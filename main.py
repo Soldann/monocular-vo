@@ -131,8 +131,8 @@ print("T matrix")
 print(t)
 
 
-projectionMat1 = np.column_stack((np.identity(3), np.zeros(3)))
-projectionMat2 = np.column_stack((R,t))
+projectionMat1 = K @ np.column_stack((np.identity(3), np.zeros(3)))
+projectionMat2 = K @ np.column_stack((R,t))
 
 print(projectionMat1)
 print(projectionMat2)
