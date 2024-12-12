@@ -90,8 +90,8 @@ class Bootstrap():
         second initial image) and the corresponding landmarks X0
         """
         # Load images
-        path_im1 = self.all_im_paths[self.init_frames[0]]        
-        path_im2 = self.all_im_paths[self.init_frames[1]]
+        path_im1 = self.all_im_paths[self.init_frames[0]].__str__()   
+        path_im2 = self.all_im_paths[self.init_frames[1]].__str__()
         im1 = cv2.imread(path_im1, cv2.IMREAD_GRAYSCALE)
         im2 = cv2.imread(path_im2, cv2.IMREAD_GRAYSCALE)
 
