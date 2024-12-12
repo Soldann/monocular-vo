@@ -58,7 +58,7 @@ class Bootstrap():
         ### Parameters
         1. data_loader : DataLoader
             - DataLoader instance initialised with one of the three datasets
-        2. init_frames : Tuple[int, int], (default (1, 3))
+        2. init_frames : Tuple[int, int], (default (0, 2))
             - Tuple of two integers that specify what images are used to
               initialise the point cloud. The integers refer to the ordering
               of the files in the directory.
@@ -75,6 +75,9 @@ class Bootstrap():
         self.t = None
         self.triangulated_points = None
         self.keypoints = None
+
+        # The colour map used to represent depth
+        self.c_map_name = "nipy_spectral"
         
 
     def get_points(self) -> tuple:
@@ -133,8 +136,11 @@ class Bootstrap():
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.view_init(elev=-90, azim=0, roll=-90)
+        c_map = plt.get_cmap(self.c_map_name)
+        z_range = self.triangulated_points[:, 2].max() - self.triangulated_points[:, 2].min()
         ax.scatter(self.triangulated_points[:, 0], self.triangulated_points[:, 1], 
-                   self.triangulated_points[:, 2], marker='o', s=5, c='r', alpha=0.5)
+                   self.triangulated_points[:, 2], marker='o', s=5, 
+                   c=self.triangulated_points[:, 2], alpha=0.5, cmap=c_map)
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
@@ -149,11 +155,17 @@ class Bootstrap():
         im_path = self.all_im_paths[self.init_frames[-1]]
         im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         ax.imshow(im, cmap="grey")
-        ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=2, c="red", alpha=0.5)
-        plt.show()
-        
 
-dl = DataLoader("kitti")
-b = Bootstrap(dl)
-b.get_points()
-b.draw_landmarks()
+        c_map = plt.get_cmap(self.c_map_name)
+        sc = ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=4, 
+                        c=self.triangulated_points[:, 2], cmap=c_map, alpha=0.5)
+        cbar = fig.colorbar(sc)
+        cbar.set_label("Distance from camera, SFM units")
+        plt.show()
+
+        
+if __name__ == "__main__":
+    dl = DataLoader("kitti")
+    b = Bootstrap(dl, (1498, 1502))
+    b.get_points()
+    b.draw_landmarks()
