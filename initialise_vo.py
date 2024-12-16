@@ -52,7 +52,8 @@ class DataLoader():
 
 class Bootstrap():
 
-    def __init__(self, data_loader: DataLoader, init_frames: tuple = (0, 2)):
+    def __init__(self, data_loader: DataLoader, init_frames: tuple = (0, 2),
+                 outlier_tolerance=(None, None, 15)):
         """
         Get an initial point cloud
 
@@ -63,32 +64,33 @@ class Bootstrap():
             - Tuple of two integers that specify what images are used to
               initialise the point cloud. The integers refer to the ordering
               of the files in the directory.
+        3. outlier_tolerance : tuple(x_tol: float, y_tol: float, z_tol: float)
+            - For overwriting the tolerance values on utils.median_outliers()
+              during the get_points() method. Pass None instead of a float 
+              value to allow for any value
         """
         
         self.data_loader = data_loader
         self.all_im_paths = data_loader.all_im_paths
         self.init_frames = init_frames
         self.K = data_loader.K
+        self.outlier_tolerance = outlier_tolerance
         
         # Filled in by get_points()
         self.E = None
         self.R = None
-        self.t = None
+        self.t = None 
         self.triangulated_points = None
         self.keypoints = None
+        self.last_img = None
 
         # The colour map used to represent depth
         self.c_map_name = "nipy_spectral"
         
 
-    def get_points(self, outlier_tolerance=(None, None, 15)) -> tuple:
+    def get_points(self) -> tuple:
         """
         Get keypoints and the corresponding landmarks 
-
-        ### Parameters
-        1. outlier_tolerance : tuple(x_tol: float, y_tol: float, z_tol: float)
-            - For overwriting the tolerance values on utils.median_outliers()
-              Pass None instead of a float value to allow for any value
 
         ### Returns
         Tuple[np.array, np.array]
@@ -140,7 +142,7 @@ class Bootstrap():
         self.keypoints = self.keypoints[in_FOV]
 
         # Outlier removal: remove points whose z-value greatly deviates from the median
-        z_mask = median_outliers(self.triangulated_points, *outlier_tolerance)
+        z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
         self.triangulated_points = self.triangulated_points[z_mask]
         self.keypoints = self.keypoints[z_mask]
 
@@ -218,6 +220,6 @@ class Bootstrap():
         
 if __name__ == "__main__":
     dl = DataLoader("kitti")
-    b = Bootstrap(dl)
-    b.get_points(outlier_tolerance=(15, None, 15))
+    b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+    b.get_points()
     b.draw_all()

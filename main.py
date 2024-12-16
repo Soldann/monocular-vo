@@ -1,10 +1,20 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from pathlib import Path
  
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
 
+
+dl = DataLoader("kitti")
+b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+vo = VO(b)
+vo.next_image()
+vo.track_keypoints()
+vo.draw_keypoint_tracking()
+
+"""
 dl = DataLoader("kitti")
 b = Bootstrap(dl)
 bootstrap_keypoints, bootstrap_3d_points = b.get_points()
@@ -32,7 +42,14 @@ nextImg = cv2.imread(dl.all_im_paths[5].__str__(), cv2.IMREAD_GRAYSCALE)
 
 
 vo = VO(bootstrap_keypoints, bootstrap_3d_points, None, None, None)
-vo.process_frame(cv2.imread(dl.all_im_paths[2].__str__(), cv2.IMREAD_GRAYSCALE), cv2.imread(dl.all_im_paths[10].__str__(), cv2.IMREAD_GRAYSCALE))
+p_new = vo.process_frame(cv2.imread(dl.all_im_paths[2].__str__(), cv2.IMREAD_GRAYSCALE), cv2.imread(dl.all_im_paths[10].__str__(), cv2.IMREAD_GRAYSCALE))
+
+# Drawing the new keypoints:
+fig, ax = plt.subplots()
+ax.imshow(nextImg, cmap="grey")
+sc = ax.scatter(p_new[:, 0], p_new[:, 1], s=4, alpha=0.5)
+plt.show(block=True)
+
 # # Plot the results
 # plt.figure()
 # dh = int(im2.shape[0] - im1.shape[0])
@@ -57,3 +74,4 @@ vo.process_frame(cv2.imread(dl.all_im_paths[2].__str__(), cv2.IMREAD_GRAYSCALE),
 # plt.show()
 # plt.imshow(im2)
 # plt.show()
+"""
