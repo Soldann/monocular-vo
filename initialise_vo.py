@@ -224,7 +224,7 @@ class Bootstrap():
 
         # KEYPOINTS
         ax = fig.add_subplot(121)
-        im_path = self.all_im_paths[self.init_frames[-1]]
+        im_path = self.all_im_paths[self.init_frames[-1]].__str__()
         im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         ax.imshow(im, cmap="grey")
 

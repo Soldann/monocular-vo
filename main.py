@@ -9,10 +9,14 @@ from initialise_vo import Bootstrap, DataLoader
 
 dl = DataLoader("kitti")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
-vo = VO(b)
-vo.next_image()
-vo.track_keypoints()
-vo.draw_keypoint_tracking()
+bootstrap_keypoints, bootstrap_3d_points, bootstrap_candidate_points = b.get_points()
+vo = VO(b.K, bootstrap_keypoints, bootstrap_3d_points, bootstrap_candidate_points, None, None)
+prevImg = cv2.imread(dl.all_im_paths[2].__str__(), cv2.IMREAD_GRAYSCALE)
+nextImg = cv2.imread(dl.all_im_paths[3].__str__(), cv2.IMREAD_GRAYSCALE)
+p_new = vo.process_frame(prevImg, nextImg, debug=True)
+# vo.next_image()
+# vo.track_keypoints()
+# vo.draw_keypoint_tracking()
 
 """
 dl = DataLoader("kitti")

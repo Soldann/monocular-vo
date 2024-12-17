@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 
 class VO:
 
-    def __init__(self, bootstrap_obj, max_keypoints=100):
+    def __init__(self, K, Pi, Xi, Ci, Pose, max_keypoints=100):
+    # def __init__(self, bootstrap_obj, max_keypoints=100):
         """
         Visual Odometry pipeline.
         
@@ -16,7 +17,6 @@ class VO:
               marks and the positions of the corresponding keypoints
         """
 
-    def __init__(self, K, Pi, Xi, Ci, Pose):
         # The current state of the pipeline
         #   K      Intrinsic matrix of camera
         #
@@ -29,31 +29,6 @@ class VO:
         #   T_i    In state i: the camera pose at the first observation of
         #          each keypoint in C_i
 
-        # The previous state i-1 of the pipeline:
-        self.Pi_1 = None
-        self.Xi_1 = None
-        self.Ci_1 = None
-        self.Fi_1 = None
-        self.Ti_1 = None
-
-        self.img_i_1 = None
-        self.i = 0              # state number
-
-        # The current (new) state i of the pipeline
-        self.Pi = None
-        self.Xi = None
-
-        self.img_i = None
-
-        # Setting information from bootstrapping
-        self.dl = bootstrap_obj.data_loader                              # data loader
-        self.Pi_1, self.Xi_1 = bootstrap_obj.get_points()       # landmarks, keypoints
-        self.i = bootstrap_obj.init_frames[-1]                  # state counter
-        last_bootstrap_img_path = self.dl.all_im_paths[self.i]  # setting last image
-        self.img_i = cv2.imread(last_bootstrap_img_path.as_posix(), 
-                                cv2.IMREAD_GRAYSCALE)
-
-        # Parameters Lucas Kanade
         self.K = K
         self.distortion_coefficients = None
 
@@ -65,6 +40,15 @@ class VO:
 
         self.max_keypoints = max_keypoints
 
+        # Setting information from bootstrapping
+        # self.dl = bootstrap_obj.data_loader                              # data loader
+        # self.Pi_1, self.Xi_1 = bootstrap_obj.get_points()       # landmarks, keypoints
+        # self.i = bootstrap_obj.init_frames[-1]                  # state counter
+        # last_bootstrap_img_path = self.dl.all_im_paths[self.i]  # setting last image
+        # self.img_i = cv2.imread(last_bootstrap_img_path.as_posix(), 
+        #                         cv2.IMREAD_GRAYSCALE)
+
+        # Parameters Lucas Kanade
         self.lk_params = dict( winSize  = (15, 15),
                   maxLevel = 0,
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
@@ -108,19 +92,50 @@ class VO:
 
         # Step 2: Run PnP to get pose for the new frame
         
-        success, rvec, tvec = cv2.solvePnP(self.Xi_1[P_i_tracked], self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_ITERATIVE)
-        # TODO: tvec is given as the position of the previous origin in the new camera frame
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
-        transformation_i_1_to_i = np.column_stack((rotation_matrix, tvec))
-        transformation_world_to_i = 
+        success, r_cw, c_t_cw = cv2.solvePnP(self.Xi_1[P_i_tracked], self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_ITERATIVE)
+        # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
+        R_cw, _ = cv2.Rodrigues(r_cw) # rotation vector world to camera frame
+        transformation_i_1_to_i = np.column_stack((R_cw, c_t_cw))
 
         # Step 3: Run KLT on candidate keypoints
         C_i, C_i_tracked = self.run_KLT(img_i_1, img_i, self.Ci_1, "C", debug)
 
         # Step 4: Calculate angles between each tracked C_i
+        for candidate_i, candidate_i_1 in zip(C_i, self.Ci_1[C_i_tracked]):
+            vector_to_candidate_i = self.K @ np.append(candidate_i, 1)[:, None]
+            angle_between_baseline_and_point_i = np.arccos(
+                                                            np.dot(c_t_cw.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
+                                                            (np.linalg.norm(c_t_cw) * np.linalg.norm(vector_to_candidate_i))
+                                                            )
+            vector_to_candidate_i_1 = self.K @ np.append(candidate_i, 1)[:, None]
+            w_t_wc = - np.linalg.inv(R_cw) @ c_t_cw
+            angle_between_baseline_and_point_i_1 = np.arccos(
+                                                            np.dot(w_t_wc.reshape(-1), vector_to_candidate_i_1.reshape(-1)) / 
+                                                            (np.linalg.norm(w_t_wc) * np.linalg.norm(vector_to_candidate_i_1))
+                                                            )
+            
+            angle_between_points = np.pi - angle_between_baseline_and_point_i_1 - angle_between_baseline_and_point_i
+            print(angle_between_points)
+            if debug:
+                fig, (ax1, ax2) = plt.subplots(1,2)
+                ax1.imshow(img_i_1, cmap="grey")
+                ax2.imshow(img_i, cmap="grey")
 
-        # TODO: Is there some way to do this without triangulation? 
-        triangulated_points = 
+                a, b = candidate_i.ravel()
+                c, d = candidate_i_1.ravel()
+                # cv2.line(mask, (int(a), int(b)), (int(c), int(d)), (0, 255, 0), 2)
+                ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
+                ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
+                # cv2.circle(img_i, (int(a), int(b)), 5, (0, 255, 0), -1)
+                
+                ax1.scatter(c, d, s=5, c="green", alpha=0.5)
+                ax2.scatter(a, b, s=5, c="red", alpha=0.5)
+                ax1.set_title(f"C_i in Old Image")
+                ax2.set_title(f"C_i in New Image")
+                plt.show()
+        # TODO: Is there some way to do this without triangulation?
+
+        # triangulated_points = 
         # projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
         # projectionMat2 = self.K @ np.column_stack((self.R, self.t))
 
