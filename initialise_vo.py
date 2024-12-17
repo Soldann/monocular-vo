@@ -45,8 +45,23 @@ class DataLoader():
             # Number of images in the dataset
             self.n_im = len(self.all_im_paths)
 
-        elif dataset in ("malaga", "parking"):
-            message = "TODO: implement data loader for malaga and parking"
+        elif dataset == "parking":
+            base_path = Path.cwd().joinpath("datasets", "parking")
+            
+            k_matrix_path = base_path.joinpath("K.txt")
+            self.K = np.loadtxt(k_matrix_path, dtype=str)
+            self.K = np.array([row[i].replace(",", "") for row in self.K for i in range(3)])
+            self.K = self.K.astype(float)
+            self.K = self.K.reshape(3, 3)
+
+            self.im_dir = base_path.joinpath("images")
+
+            self.all_im_paths = list(self.im_dir.glob("*"))
+
+            self.n_im = len(self.all_im_paths)
+
+        elif dataset == "malaga":
+            message = "TODO: implement data loader for malaga"
             raise NotImplementedError(message)
 
 
@@ -238,7 +253,4 @@ class Bootstrap():
 
         
 if __name__ == "__main__":
-    dl = DataLoader("kitti")
-    b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
-    b.get_points()
-    b.draw_all()
+    dl = DataLoader("parking")
