@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from pathlib import Path
+from utils import *
  
 import matplotlib
 from matplotlib.patches import FancyArrowPatch
@@ -51,31 +52,41 @@ class DataLoader():
 
 class Bootstrap():
 
-    def __init__(self, data_loader: DataLoader, init_frames: tuple = (0, 2)):
+    def __init__(self, data_loader: DataLoader, init_frames: tuple = (0, 2),
+                 outlier_tolerance=(None, None, 15)):
         """
         Get an initial point cloud
 
         ### Parameters
         1. data_loader : DataLoader
             - DataLoader instance initialised with one of the three datasets
-        2. init_frames : Tuple[int, int], (default (1, 3))
+        2. init_frames : Tuple[int, int], (default (0, 2))
             - Tuple of two integers that specify what images are used to
               initialise the point cloud. The integers refer to the ordering
               of the files in the directory.
+        3. outlier_tolerance : tuple(x_tol: float, y_tol: float, z_tol: float)
+            - For overwriting the tolerance values on utils.median_outliers()
+              during the get_points() method. Pass None instead of a float 
+              value to allow for any value
         """
         
         self.data_loader = data_loader
         self.all_im_paths = data_loader.all_im_paths
         self.init_frames = init_frames
         self.K = data_loader.K
+        self.outlier_tolerance = outlier_tolerance
         
         # Filled in by get_points()
         self.E = None
         self.R = None
-        self.t = None
+        self.t = None 
         self.triangulated_points = None
         self.candidate_points = None
         self.keypoints = None
+        self.last_img = None
+
+        # The colour map used to represent depth
+        self.c_map_name = "nipy_spectral"
         
 
     def get_points(self) -> tuple:
@@ -130,9 +141,33 @@ class Bootstrap():
         self.triangulated_points = self.triangulated_points / self.triangulated_points[3]
         self.triangulated_points = self.triangulated_points[:3, :].T
 
+        # Outlier removal: checking if the points are inside the FOV
+        h, w = im1.shape
+        alpha = self.K[0, 0]
+        in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
+        self.triangulated_points = self.triangulated_points[in_FOV]
+        self.keypoints = self.keypoints[in_FOV]
+
+        # Outlier removal: remove points whose z-value greatly deviates from the median
+        z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
+        self.triangulated_points = self.triangulated_points[z_mask]
+        self.keypoints = self.keypoints[z_mask]
+
+        # Outlier removal: checking if the points are inside the FOV
+        h, w = im1.shape
+        alpha = self.K[0, 0]
+        in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
+        self.triangulated_points = self.triangulated_points[in_FOV]
+        self.keypoints = self.keypoints[in_FOV]
+
+        # Outlier removal: remove points whose z-value greatly deviates from the median
+        z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
+        self.triangulated_points = self.triangulated_points[z_mask]
+        self.keypoints = self.keypoints[z_mask]
+
         return self.keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy()
 
-    def draw_landmarks(self):
+    def draw_landmarks(self, aspect_x=20, aspect_y=10, aspect_z=15):
         """
         Draw the 3D landmarks estimated by get_points()
         """
@@ -140,12 +175,16 @@ class Bootstrap():
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.view_init(elev=-90, azim=0, roll=-90)
+        c_map = plt.get_cmap(self.c_map_name)
+        z_range = self.triangulated_points[:, 2].max() - self.triangulated_points[:, 2].min()
         ax.scatter(self.triangulated_points[:, 0], self.triangulated_points[:, 1], 
-                   self.triangulated_points[:, 2], marker='o', s=5, c='r', alpha=0.5)
+                   self.triangulated_points[:, 2], marker='o', s=5, 
+                   c=self.triangulated_points[:, 2], alpha=0.5, cmap=c_map)
+        ax.set_box_aspect((aspect_x, aspect_y, aspect_z))
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
-        plt.show()
+        plt.show(block=True)
 
     def draw_keypoints(self):
         """
@@ -156,11 +195,50 @@ class Bootstrap():
         im_path = self.all_im_paths[self.init_frames[-1]].__str__()
         im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         ax.imshow(im, cmap="grey")
-        ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=2, c="red", alpha=0.5)
-        plt.show()
-        
 
-dl = DataLoader("kitti")
-b = Bootstrap(dl)
-b.get_points()
-b.draw_landmarks()
+        c_map = plt.get_cmap(self.c_map_name)
+        sc = ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=4, 
+                        c=self.triangulated_points[:, 2], cmap=c_map, alpha=0.5)
+        cbar = fig.colorbar(sc, orientation="horizontal")
+        cbar.set_label("Distance from camera, SFM units")
+        plt.show(block=True)
+
+
+    def draw_all(self, aspect_x=20, aspect_y=10, aspect_z=15):
+        """
+        Draws both the landmarks and keypoints
+        """
+        # LANDMARKS
+        fig = plt.figure(figsize=(14, 5))
+        ax = fig.add_subplot(122, projection='3d')
+        ax.view_init(elev=-90, azim=0, roll=-90)
+        c_map = plt.get_cmap(self.c_map_name)
+        z_range = self.triangulated_points[:, 2].max() - self.triangulated_points[:, 2].min()
+        ax.scatter(self.triangulated_points[:, 0], self.triangulated_points[:, 1], 
+                   self.triangulated_points[:, 2], marker='o', s=5, 
+                   c=self.triangulated_points[:, 2], alpha=0.5, cmap=c_map)
+        ax.set_box_aspect((aspect_x, aspect_y, aspect_z))
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+
+        # KEYPOINTS
+        ax = fig.add_subplot(121)
+        im_path = self.all_im_paths[self.init_frames[-1]]
+        im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
+        ax.imshow(im, cmap="grey")
+
+        c_map = plt.get_cmap(self.c_map_name)
+        sc = ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=4, 
+                        c=self.triangulated_points[:, 2], cmap=c_map, alpha=0.5)
+        cbar = fig.colorbar(sc, orientation="horizontal")
+        cbar.set_label("Distance from camera, SFM units")
+        
+        plt.show(block=True)
+
+        
+if __name__ == "__main__":
+    dl = DataLoader("kitti")
+    b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+    b.get_points()
+    b.draw_all()

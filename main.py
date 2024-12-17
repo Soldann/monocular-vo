@@ -1,10 +1,20 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from pathlib import Path
  
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
 
+
+dl = DataLoader("kitti")
+b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+vo = VO(b)
+vo.next_image()
+vo.track_keypoints()
+vo.draw_keypoint_tracking()
+
+"""
 dl = DataLoader("kitti")
 b = Bootstrap(dl)
 bootstrap_keypoints, bootstrap_3d_points, bootstrap_candidate_points = b.get_points()
@@ -31,7 +41,14 @@ nextImg = cv2.imread(dl.all_im_paths[3].__str__(), cv2.IMREAD_GRAYSCALE)
 # nextpt, status, err = cv2.calcOpticalFlowPyrLK(prevImg, nextImg, prevPts, None, **lk_params)
 
 vo = VO(b.K, bootstrap_keypoints, bootstrap_3d_points, bootstrap_candidate_points, None, None)
-vo.process_frame(prevImg, nextImg, debug=True)
+p_new = vo.process_frame(prevImg, nextImg, debug=True)
+
+# Drawing the new keypoints:
+fig, ax = plt.subplots()
+ax.imshow(nextImg, cmap="grey")
+sc = ax.scatter(p_new[:, 0], p_new[:, 1], s=4, alpha=0.5)
+plt.show(block=True)
+
 # # Plot the results
 # plt.figure()
 # dh = int(im2.shape[0] - im1.shape[0])
@@ -56,3 +73,4 @@ vo.process_frame(prevImg, nextImg, debug=True)
 # plt.show()
 # plt.imshow(im2)
 # plt.show()
+"""
