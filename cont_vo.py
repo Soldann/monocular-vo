@@ -102,12 +102,12 @@ class VO:
 
         # Step 4: Calculate angles between each tracked C_i
         for candidate_i, candidate_i_1 in zip(C_i, self.Ci_1[C_i_tracked]):
-            vector_to_candidate_i = self.K @ np.append(candidate_i, 1)[:, None]
+            vector_to_candidate_i = np.linalg.inv(self.K) @ np.append(candidate_i, 1)[:, None]
             angle_between_baseline_and_point_i = np.arccos(
                                                             np.dot(c_t_cw.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
                                                             (np.linalg.norm(c_t_cw) * np.linalg.norm(vector_to_candidate_i))
                                                             )
-            vector_to_candidate_i_1 = self.K @ np.append(candidate_i, 1)[:, None]
+            vector_to_candidate_i_1 = np.linalg.inv(self.K) @ np.append(candidate_i_1, 1)[:, None]
             w_t_wc = - np.linalg.inv(R_cw) @ c_t_cw
             angle_between_baseline_and_point_i_1 = np.arccos(
                                                             np.dot(w_t_wc.reshape(-1), vector_to_candidate_i_1.reshape(-1)) / 
@@ -133,17 +133,30 @@ class VO:
                 ax1.set_title(f"C_i in Old Image")
                 ax2.set_title(f"C_i in New Image")
                 plt.show()
-        # TODO: Is there some way to do this without triangulation?
 
-        # triangulated_points = 
-        # projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
-        # projectionMat2 = self.K @ np.column_stack((self.R, self.t))
+            """"
+                Here is some code that does the same as above but using triangulation for the algorithm
+                You can use it to verify if the above works
 
-        # self.triangulated_points = cv2.triangulatePoints(projectionMat1, projectionMat2, 
-        #                                                  points1[ransac_inliers].T, points2[ransac_inliers].T)
+                projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
+                projectionMat2 = self.K @ np.column_stack((R_cw, c_t_cw))
 
-        
-        
+                triangulated_point = cv2.triangulatePoints(projectionMat1, projectionMat2, candidate_i_1, candidate_i)
+                triangulated_point /= triangulated_point[3]
+                triangulated_point = triangulated_point[:3]
+
+                triangulated_point_in_i = R_cw @ triangulated_point + c_t_cw
+                ci_1_in_i = R_cw @ vector_to_candidate_i_1 + c_t_cw
+                
+                triangulated_point_to_ci_1 = ci_1_in_i - triangulated_point_in_i
+                triangulated_point_to_ci = vector_to_candidate_i - triangulated_point_in_i
+
+                angle_between_points_with_triangulation = np.arccos(
+                        np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_ci_1.reshape(-1)) / 
+                        (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_ci_1))
+                )
+            """ 
+            
         # update our state vectors
 
     def draw_keypoint_tracking(self):
