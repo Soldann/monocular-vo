@@ -74,6 +74,7 @@ class Bootstrap():
         self.R = None
         self.t = None
         self.triangulated_points = None
+        self.candidate_points = None
         self.keypoints = None
         
 
@@ -82,9 +83,11 @@ class Bootstrap():
         Get keypoints and the corresponding landmarks 
 
         ### Returns
-        Tuple[np.array, np.array]
-        A tuple of two numpy arrays: the initial keypoints P0 (from the 
-        second initial image) and the corresponding landmarks X0
+        Tuple[np.array, np.array, np.array]
+        A tuple of three numpy arrays:
+            - the initial keypoints P0 (from the second initial image)
+            - the corresponding landmarks X0
+            - the candidate keypoints C0 (from the second image)
         """
         # Load images
         path_im1 = self.all_im_paths[self.init_frames[0]].__str__()   
@@ -103,7 +106,8 @@ class Bootstrap():
         # Apply ratio test
         good = []
         for m,n in matches:
-            if m.distance < 0.8*n.distance or n.distance < 0.8*m.distance:
+            # if m.distance < 0.8*n.distance or n.distance < 0.8*m.distance:
+            if m.distance < 0.8*n.distance:
                 good.append([m])
 
         # Essential matrix by 8p algorithm
@@ -112,6 +116,9 @@ class Bootstrap():
         self.E, ransac_inliers = cv2.findEssentialMat(points1, points2, self.K, cv2.FM_RANSAC, 0.99, 2)
         ransac_inliers = ransac_inliers.astype(np.bool_).reshape(-1)
         self.keypoints = points2[ransac_inliers]
+        self.candidate_points = points2[~ransac_inliers]
+
+        #TODO: remove points behind the camera, too far from the mean, and too far depth wise
 
         _, self.R, self.t, _ = cv2.recoverPose(self.E, points1[ransac_inliers], points2[ransac_inliers], self.K)
 
@@ -123,7 +130,7 @@ class Bootstrap():
         self.triangulated_points = self.triangulated_points / self.triangulated_points[3]
         self.triangulated_points = self.triangulated_points[:3, :].T
 
-        return self.keypoints.copy(), self.triangulated_points.copy()
+        return self.keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy()
 
     def draw_landmarks(self):
         """
@@ -146,7 +153,7 @@ class Bootstrap():
         """
 
         fig, ax = plt.subplots()
-        im_path = self.all_im_paths[self.init_frames[-1]]
+        im_path = self.all_im_paths[self.init_frames[-1]].__str__()
         im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
         ax.imshow(im, cmap="grey")
         ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=2, c="red", alpha=0.5)

@@ -7,10 +7,10 @@ from initialise_vo import Bootstrap, DataLoader
 
 dl = DataLoader("kitti")
 b = Bootstrap(dl)
-bootstrap_keypoints, bootstrap_3d_points = b.get_points()
+bootstrap_keypoints, bootstrap_3d_points, bootstrap_candidate_points = b.get_points()
 
 prevImg = cv2.imread(dl.all_im_paths[2].__str__(), cv2.IMREAD_GRAYSCALE)
-nextImg = cv2.imread(dl.all_im_paths[5].__str__(), cv2.IMREAD_GRAYSCALE)
+nextImg = cv2.imread(dl.all_im_paths[3].__str__(), cv2.IMREAD_GRAYSCALE)
 
 # # Example points (replace with your actual points)
 # prevPts = np.array([[100, 200], [150, 250]], dtype=np.float32)
@@ -30,9 +30,8 @@ nextImg = cv2.imread(dl.all_im_paths[5].__str__(), cv2.IMREAD_GRAYSCALE)
 #                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
 # nextpt, status, err = cv2.calcOpticalFlowPyrLK(prevImg, nextImg, prevPts, None, **lk_params)
 
-
-vo = VO(bootstrap_keypoints, bootstrap_3d_points, None, None, None)
-vo.process_frame(cv2.imread(dl.all_im_paths[2].__str__(), cv2.IMREAD_GRAYSCALE), cv2.imread(dl.all_im_paths[10].__str__(), cv2.IMREAD_GRAYSCALE))
+vo = VO(b.K, bootstrap_keypoints, bootstrap_3d_points, bootstrap_candidate_points, None, None)
+vo.process_frame(prevImg, nextImg, debug=True)
 # # Plot the results
 # plt.figure()
 # dh = int(im2.shape[0] - im1.shape[0])
