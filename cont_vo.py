@@ -1,14 +1,15 @@
 import cv2
 import numpy as np
+from initialise_vo import Bootstrap
 import matplotlib.pyplot as plt
 
 class VO:
 
-    def __init__(self, K, Pi, Xi, Ci, Pose, max_keypoints=100):
-    # def __init__(self, bootstrap_obj, max_keypoints=100):
+    def __init__(self, bootstrap_obj: Bootstrap, max_keypoints=100):
         """
         Visual Odometry pipeline.
         
+        Initialize VO using a bootstrap object. 
         SLAM continues from the second frame used for bootstrapping.
 
         ### Parameters
@@ -29,29 +30,25 @@ class VO:
         #   T_i    In state i: the camera pose at the first observation of
         #          each keypoint in C_i
 
-        self.K = K
+        self.K = bootstrap_obj.data_loader.K
         self.distortion_coefficients = None
 
-        self.Pi_1 = Pi
-        self.Xi_1 = Xi
-        self.Ci_1 = Ci
-        self.Fi_1 = Ci
-        self.Ti_1 = None
+        self.Pi_1, self.Xi_1, self.Ci_1, initial_pose = bootstrap_obj.get_points()       # landmarks, keypoints
+        self.F_i = self.Ci_1.copy()
+
+        self.Ti_1 = np.tile(initial_pose.reshape(-1), (len(self.Ci_1), 1))
 
         self.max_keypoints = max_keypoints
 
         # Setting information from bootstrapping
-        # self.dl = bootstrap_obj.data_loader                              # data loader
-        # self.Pi_1, self.Xi_1 = bootstrap_obj.get_points()       # landmarks, keypoints
-        # self.i = bootstrap_obj.init_frames[-1]                  # state counter
-        # last_bootstrap_img_path = self.dl.all_im_paths[self.i]  # setting last image
-        # self.img_i = cv2.imread(last_bootstrap_img_path.as_posix(), 
-        #                         cv2.IMREAD_GRAYSCALE)
+        self.dl = bootstrap_obj.data_loader                              # data loader
+        self.img_i = self.dl[bootstrap_obj.init_frames[-1]]
 
         # Parameters Lucas Kanade
         self.lk_params = dict( winSize  = (15, 15),
                   maxLevel = 0,
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
         """
@@ -134,9 +131,9 @@ class VO:
                 ax2.set_title(f"C_i in New Image")
                 plt.show()
 
-            """"
-                Here is some code that does the same as above but using triangulation for the algorithm
-                You can use it to verify if the above works
+                """
+                # Here is some code that does the same as above but using triangulation for the algorithm
+                # You can use it to verify if the above works
 
                 projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
                 projectionMat2 = self.K @ np.column_stack((R_cw, c_t_cw))
@@ -155,9 +152,15 @@ class VO:
                         np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_ci_1.reshape(-1)) / 
                         (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_ci_1))
                 )
-            """ 
+                """
+
+        # Step 5: Add candidates that match thresholds to sets
+            
+        # Step 6: 
+            
             
         # update our state vectors
+
 
     def draw_keypoint_tracking(self):
         """

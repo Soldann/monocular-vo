@@ -65,6 +65,11 @@ class DataLoader():
             raise NotImplementedError(message)
 
 
+    def __getitem__(self, index):
+        img_path = str(self.all_im_paths[index])
+        return cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+
+
 class Bootstrap():
 
     def __init__(self, data_loader: DataLoader, init_frames: tuple = (0, 2),
@@ -104,22 +109,26 @@ class Bootstrap():
         self.c_map_name = "nipy_spectral"
         
 
-    def get_points(self) -> tuple:
+    def get_points(self, img1_index=None, img2_index=None) -> tuple:
         """
         Get keypoints and the corresponding landmarks 
 
         ### Returns
-        Tuple[np.array, np.array, np.array]
-        A tuple of three numpy arrays:
+        Tuple[np.array, np.array, np.array, np.aarray]
+        A tuple of four numpy arrays:
             - the initial keypoints P0 (from the second initial image)
             - the corresponding landmarks X0
             - the candidate keypoints C0 (from the second image)
+            - the transformation matrix T_cw, from world to camera frame
         """
+        if img1_index:
+            self.init_frames[0] = img1_index
+        if img2_index:
+            self.init_frames[1] = img2_index
+
         # Load images
-        path_im1 = self.all_im_paths[self.init_frames[0]].__str__()   
-        path_im2 = self.all_im_paths[self.init_frames[1]].__str__()
-        im1 = cv2.imread(path_im1, cv2.IMREAD_GRAYSCALE)
-        im2 = cv2.imread(path_im2, cv2.IMREAD_GRAYSCALE)
+        im1 = self.data_loader[self.init_frames[0]]
+        im2 = self.data_loader[self.init_frames[1]]
 
         # Feature extraction
         sift = cv2.SIFT_create()
@@ -147,9 +156,10 @@ class Bootstrap():
         #TODO: remove points behind the camera, too far from the mean, and too far depth wise
 
         _, self.R, self.t, _ = cv2.recoverPose(self.E, points1[ransac_inliers], points2[ransac_inliers], self.K)
+        self.transformation_matrix = np.column_stack((self.R, self.t))
 
         projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
-        projectionMat2 = self.K @ np.column_stack((self.R, self.t))
+        projectionMat2 = self.K @ self.transformation_matrix
 
         self.triangulated_points = cv2.triangulatePoints(projectionMat1, projectionMat2, 
                                                          points1[ransac_inliers].T, points2[ransac_inliers].T)
@@ -180,7 +190,7 @@ class Bootstrap():
         self.triangulated_points = self.triangulated_points[z_mask]
         self.keypoints = self.keypoints[z_mask]
 
-        return self.keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy()
+        return self.keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy(), self.transformation_matrix.copy()
 
     def draw_landmarks(self, aspect_x=20, aspect_y=10, aspect_z=15):
         """
@@ -207,8 +217,7 @@ class Bootstrap():
         """
 
         fig, ax = plt.subplots()
-        im_path = self.all_im_paths[self.init_frames[-1]].__str__()
-        im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
+        im = cv2.imread(self.data_loader[self.init_frames[-1]], cv2.IMREAD_GRAYSCALE)
         ax.imshow(im, cmap="grey")
 
         c_map = plt.get_cmap(self.c_map_name)
@@ -239,9 +248,7 @@ class Bootstrap():
 
         # KEYPOINTS
         ax = fig.add_subplot(121)
-        im_path = self.all_im_paths[self.init_frames[-1]].__str__()
-        im = cv2.imread(im_path, cv2.IMREAD_GRAYSCALE)
-        ax.imshow(im, cmap="grey")
+        ax.imshow(self.data_loader[self.init_frames[-1]], cmap="grey")
 
         c_map = plt.get_cmap(self.c_map_name)
         sc = ax.scatter(self.keypoints[:, 0], self.keypoints[:, 1], s=4, 
