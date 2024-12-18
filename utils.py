@@ -93,6 +93,42 @@ def median_outliers(p: np.array, x_tol=None, y_tol=None, z_tol=15) -> np.array:
     return np.all(conditions, axis=0)
 
 
+def multiply_transformation(transform_ab, transform_bc):
+    """
+    Computes the combined transformation matrix T_ab X T_bc = T_ac
+    ### Parameters
+    - transform np.array shape (3, 4)
+        - A standard transformation matrix T_ab, converting point from frame b to frame a
+    - transformations np.array shape (3, 4)
+        - A standard transformation matrix T_bc, converting a point from frame c to frame b
+
+    ### Returns
+    -  np.array shape (3 x 4)
+        - A standard transformation matrix T_ac, converting a point from frame c to frame a
+    """
+    R_ac = transform_ab[:,:3] @ transform_bc[:,:3]
+    t_ac = transform_ab[:,:3] @ transform_bc[:,3] + transform_ab[:,3]
+    return np.column_stack((R_ac, t_ac))
+
+def inverse_transformation(transformation):
+    """
+    Computes the inverse of a standard transformation matrix
+    ### Parameters
+    - transformations np.array shape (3, 4)
+        - A standard transformation matrix, converting a point from frame a to frame b
+
+    ### Returns
+    -  np.array shape (3 x 4)
+        - A standard transformation matrix , converting a point from frame b to frame a
+    """
+    R_ba = transformation[:,:3]
+    b_t_ba = transformation[:, 3]
+
+    R_ab = R_ba.T
+    a_t_ab = - R_ab @ b_t_ba
+    return np.column_stack((R_ab, a_t_ab))
+    
+
 def triangulate_points(k, r, t, p1, p2):
     """
     ### Parameters

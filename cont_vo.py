@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from initialise_vo import Bootstrap
 import matplotlib.pyplot as plt
+from utils import inverse_transformation, multiply_transformation
 
 class VO:
 
@@ -36,7 +37,7 @@ class VO:
         self.Pi_1, self.Xi_1, self.Ci_1, self.T_Ci_1__w = bootstrap_obj.get_points() # landmarks, keypoints, candidate points, transform world to camera position i-1
         self.Fi_1 = self.Ci_1.copy()
 
-        self.Ti_1 = np.tile(np.column_stack((np.identity(3), np.zeros((3,1)))).reshape(-1), (len(self.Ci_1), 1))
+        self.Ti_1 = np.tile(self.T_Ci_1__w.reshape(-1), (len(self.Ci_1), 1))
         
         self.max_keypoints = max_keypoints
 
@@ -53,7 +54,7 @@ class VO:
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
 
 
-    def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
+    def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=True):
         """
             Wrapper function for CV2 KLT
         """
@@ -99,9 +100,7 @@ class VO:
         success, r_cw, c_t_cw = cv2.solvePnP(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_ITERATIVE) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
         R_cw, _ = cv2.Rodrigues(r_cw) # rotation vector world to camera frame
-        transformation_i_1_to_i = np.column_stack((R_cw, c_t_cw))
-        homogenous_transform_C_i__C_i_1 = np.row_stack((transformation_i_1_to_i, np.array([0,0,0,1]))) # from Ci_1 to Ci
-        self.T_Ci_1__w = (homogenous_transform_C_i__C_i_1 @ np.row_stack((self.T_Ci_1__w, np.array([0,0,0,1]))))[:3,:] # from world to current frame (just store it in the object in advance :D)
+        self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))
         
         R_w_Ci = self.T_Ci_1__w[:3,:3].T # rotation vector from Ci to world is inverse or rotation vector world to Ci
         w_t_w_Ci = - R_w_Ci @ self.T_Ci_1__w[:3,3, None] # tranformation vector from Ci to world in world frame, vertical vector
@@ -109,18 +108,16 @@ class VO:
         # Step 3: Run KLT on candidate keypoints
         C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C")
 
-        # Step 4: Update T_i with only successfully tracked stuff
+        # Step 4: Calculate angles between each tracked C_i
         # TODO: Can we do this without a for loop?
-        for i in range(self.Ti_1[C_i_tracked].shape[0]):
-            homogenous_transform_Ci_1__w = np.row_stack((self.Ti_1[i].reshape(3,4), np.array([0,0,0,1]))) # from world to Ci_1
-            transformation_first_sighting_to_i = homogenous_transform_C_i__C_i_1 @ homogenous_transform_Ci_1__w
-            self.Ti_1[i] = transformation_first_sighting_to_i[:3,:].reshape(-1)
+        for point_index in np.where(C_i_tracked)[0]: # loop through all tracked candidate points
+            candidate_i = C_i[point_index]
+            candidate_f = self.Fi_1[point_index]
+            transformation_fw = self.Ti_1[point_index]
 
-        # Step 5: Calculate angles between each tracked C_i
-        # TODO: Can we do this without a for loop?
-        for candidate_i, candidate_f, transformation in zip(C_i[C_i_tracked], self.Fi_1[C_i_tracked], self.Ti_1[C_i_tracked]):
-            R_cf = transformation.reshape(3,4)[:,:3]
-            c_t_cf = transformation.reshape(3,4)[:,3] # column vector
+            T_if = multiply_transformation(self.T_Ci_1__w, inverse_transformation(transformation_fw.reshape(3,4)))
+            R_cf = T_if.reshape(3,4)[:,:3]
+            c_t_cf = T_if.reshape(3,4)[:,3][:,None] # column vector
 
             vector_to_candidate_i = np.linalg.inv(self.K) @ np.append(candidate_i, 1)[:, None]
             angle_between_baseline_and_point_i = np.arccos(
@@ -135,29 +132,12 @@ class VO:
                                                             )
             
             angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
-            # print(angle_between_points)
-            if debug:
-                fig, (ax1, ax2) = plt.subplots(1,2)
-                ax1.imshow(self.img_i_1, cmap="grey")
-                ax2.imshow(img_i, cmap="grey")
 
-                a, b = candidate_i.ravel()
-                c, d = candidate_f.ravel()
-                # cv2.line(mask, (int(a), int(b)), (int(c), int(d)), (0, 255, 0), 2)
-                ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
-                ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
-                # cv2.circle(img_i, (int(a), int(b)), 5, (0, 255, 0), -1)
-                
-                ax1.scatter(c, d, s=5, c="green", alpha=0.5)
-                ax2.scatter(a, b, s=5, c="red", alpha=0.5)
-                ax1.set_title(f"C_i in Old Image")
-                ax2.set_title(f"C_i in New Image")
-                plt.show()
+            """
+            # Here is some code that does the same as above but using triangulation for the algorithm
+            # You can use it to verify if the above works
+            """
 
-                """
-                # Here is some code that does the same as above but using triangulation for the algorithm
-                # You can use it to verify if the above works
-                """
             projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
             projectionMat2 = self.K @ np.column_stack((R_cf, c_t_cf))
 
@@ -175,14 +155,55 @@ class VO:
                     np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_f.reshape(-1)) / 
                     (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
             )
-                # print(angle_between_points_with_triangulation)
+            
+            if debug and point_index ==  np.where(C_i_tracked)[0][0]:
+                print(angle_between_points)
+                print(angle_between_points_with_triangulation)
 
+                fig = plt.figure(figsize=(14, 5))
+                gs = fig.add_gridspec(2, 2)
+                ax1 = fig.add_subplot(gs[0, 0])
+                ax2 = fig.add_subplot(gs[0, 1])
+
+                # Plot image and KLT results for candidate keypoint tracking
+                ax1.imshow(self.img_i_1, cmap="grey")
+                ax2.imshow(img_i, cmap="grey")
+
+                a, b = candidate_i.ravel()
+                c, d = candidate_f.ravel()
+                ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
+                ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
+                
+                ax1.scatter(c, d, s=5, c="green", alpha=0.5)
+                ax2.scatter(a, b, s=5, c="red", alpha=0.5)
+                ax1.set_title(f"C_i in Old Image")
+                ax2.set_title(f"C_i in New Image")
+
+                # Plot triangulation results
+                ax3 = fig.add_subplot(gs[1:, :], projection='3d')
+                ax3.view_init(elev=-90, azim=0, roll=-90)
+                ax3.set_box_aspect((20, 10, 15)) # aspect_x, aspect_y, aspect_z
+                ax3.set_xlabel("X")
+                ax3.set_ylabel("Y")
+                ax3.set_zlabel("Z")
+                points_to_plot = [
+                    (triangulated_point_in_i, "red"),
+                    (np.array([0,0,0]), "black"), # camera i center
+                    (c_t_cf, "cyan"), # camera f center
+                    (f_in_i, "green"),
+                    (vector_to_candidate_i, "magenta"),
+                ]
+                for point, colour in points_to_plot:
+                    ax3.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
+
+                plt.show()
+                
         # Step 5: Add candidates that match thresholds to sets
             if angle_between_points_with_triangulation >= self.angle_threshold:
                 # TODO: Don't use append
                 self.Pi_1 = np.append(self.Pi_1, candidate_i[None,:], axis=0)
                 self.Xi_1 = np.append(self.Xi_1, (R_w_Ci @ triangulated_point + w_t_w_Ci).T, axis=0)
-                C_i_tracked[i] = False
+                C_i_tracked[point_index] = False # remove this point from tracking
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step

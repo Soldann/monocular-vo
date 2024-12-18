@@ -12,7 +12,7 @@ b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
 
 for image in dl[2:]:
-    p_new = vo.process_frame(image, debug=False)
+    p_new = vo.process_frame(image, debug=True)
     print(p_new)
 # vo.next_image()
 # vo.track_keypoints()
