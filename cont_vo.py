@@ -184,13 +184,16 @@ class VO:
                 self.Xi_1 = np.append(self.Xi_1, (R_w_Ci @ triangulated_point + w_t_w_Ci).T, axis=0)
                 C_i_tracked[i] = False
 
-        # Step 6: Update state vectors
+        # Step 6: Run SIFT if C is too small to add new candidates
+        # TODO: Implement this step
+
+        # Step 7: Update state vectors
         self.Ci_1 = C_i[C_i_tracked]
         self.Fi_1 = self.Fi_1[C_i_tracked]
         self.Ti_1 = self.Ti_1[C_i_tracked]
         self.img_i_1 = img_i
             
-        # Step 7: Return pose
+        # Step 8: Return pose
         return self.T_Ci_1__w
 
 
