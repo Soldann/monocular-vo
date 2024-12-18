@@ -146,25 +146,26 @@ class VO:
                 """
                 # Here is some code that does the same as above but using triangulation for the algorithm
                 # You can use it to verify if the above works
-
+                """
                 projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
-                projectionMat2 = self.K @ np.column_stack((R_cw, c_t_cw))
+                projectionMat2 = self.K @ np.column_stack((R_cf, c_t_cf))
 
-                triangulated_point = cv2.triangulatePoints(projectionMat1, projectionMat2, candidate_i_1, candidate_i)
+                triangulated_point = cv2.triangulatePoints(projectionMat1, projectionMat2, candidate_f, candidate_i)
                 triangulated_point /= triangulated_point[3]
                 triangulated_point = triangulated_point[:3]
 
-                triangulated_point_in_i = R_cw @ triangulated_point + c_t_cw
-                ci_1_in_i = R_cw @ vector_to_candidate_i_1 + c_t_cw
+                triangulated_point_in_i = R_cf @ triangulated_point + c_t_cf
+                f_in_i = R_cf @ vector_to_candidate_f + c_t_cf
                 
-                triangulated_point_to_ci_1 = ci_1_in_i - triangulated_point_in_i
+                triangulated_point_to_f = f_in_i - triangulated_point_in_i
                 triangulated_point_to_ci = vector_to_candidate_i - triangulated_point_in_i
 
                 angle_between_points_with_triangulation = np.arccos(
-                        np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_ci_1.reshape(-1)) / 
-                        (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_ci_1))
+                        np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_f.reshape(-1)) / 
+                        (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
                 )
-                """
+                print(angle_between_points_with_triangulation)
+                
 
         # Step 5: Add candidates that match thresholds to sets
             
