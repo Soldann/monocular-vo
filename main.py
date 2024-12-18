@@ -7,12 +7,12 @@ from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
 
 
-dl = DataLoader("kitti")
+dl = DataLoader("parking")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
 
 for image in dl[2:]:
-    p_new = vo.process_frame(dl[2], dl[3], debug=False)
+    p_new = vo.process_frame(image, debug=False)
     print(p_new)
 # vo.next_image()
 # vo.track_keypoints()

@@ -42,7 +42,7 @@ class VO:
 
         # Setting information from bootstrapping
         self.dl = bootstrap_obj.data_loader                              # data loader
-        self.img_i = self.dl[bootstrap_obj.init_frames[-1]]
+        self.img_i_1 = self.dl[bootstrap_obj.init_frames[-1]]
 
         # Parameters Lucas Kanade
         self.lk_params = dict( winSize  = (15, 15),
@@ -87,9 +87,9 @@ class VO:
         return tracked_points, tracked
 
 
-    def process_frame(self, img_i_1, img_i, debug=False):
+    def process_frame(self, img_i, debug=False):
         # Step 1: run KLT  on the points P
-        P_i, P_i_tracked = self.run_KLT(img_i_1, img_i, self.Pi_1, "P", debug)
+        P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P")
         
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the poinits we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
@@ -107,7 +107,7 @@ class VO:
         w_t_w_Ci = - R_w_Ci @ self.T_Ci_1__w[:3,3, None] # tranformation vector from Ci to world in world frame, vertical vector
 
         # Step 3: Run KLT on candidate keypoints
-        C_i, C_i_tracked = self.run_KLT(img_i_1, img_i, self.Ci_1, "C", debug)
+        C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C")
 
         # Step 4: Update T_i with only successfully tracked stuff
         # TODO: Can we do this without a for loop?
@@ -135,10 +135,10 @@ class VO:
                                                             )
             
             angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
-            print(angle_between_points)
+            # print(angle_between_points)
             if debug:
                 fig, (ax1, ax2) = plt.subplots(1,2)
-                ax1.imshow(img_i_1, cmap="grey")
+                ax1.imshow(self.img_i_1, cmap="grey")
                 ax2.imshow(img_i, cmap="grey")
 
                 a, b = candidate_i.ravel()
@@ -188,6 +188,7 @@ class VO:
         self.Ci_1 = C_i[C_i_tracked]
         self.Fi_1 = self.Fi_1[C_i_tracked]
         self.Ti_1 = self.Ti_1[C_i_tracked]
+        self.img_i_1 = img_i
             
         # Step 7: Return pose
         return self.T_Ci_1__w
