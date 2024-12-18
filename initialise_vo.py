@@ -11,7 +11,7 @@ from mpl_toolkits.mplot3d import proj3d
 
 class DataLoader():
 
-    def __init__(self, dataset: str):
+    def __init__(self, dataset: str, malaga_rect=False):
         """
         Retrieves the images and camera intrinsics for easy switching between
         different datasets.
@@ -19,9 +19,12 @@ class DataLoader():
         ### Parameters
         1. dataset : str
             - Either "kitti", "malaga", or "parking" 
+        2. malaga_rect : bool
+            - Define whether or not the rectified images should be returned
+              for the Malaga dataset. If True, load the rectified left images
+              and the average intrinsics of both cameras. If False, load the
+              left distorted images and the left camera's intrinsics
         """
-        
-        assert dataset in ("kitti", "malaga", "parking")
         
         if dataset == "kitti":
             base_path = Path.cwd().joinpath("datasets", "kitti")
@@ -35,6 +38,9 @@ class DataLoader():
             K, R1, T1, _, _, _, _ = cv2.decomposeProjectionMatrix(P1)
             t1 = T1 / T1[3]
             self.K = K
+
+            # The images have been undistorted
+            self.dist = None
 
             # Path to the directory of the images; use image_0 by default
             self.im_dir = base_path.joinpath("05", "image_0")
@@ -54,6 +60,8 @@ class DataLoader():
             self.K = self.K.astype(float)
             self.K = self.K.reshape(3, 3)
 
+            self.dist = None
+
             self.im_dir = base_path.joinpath("images")
 
             self.all_im_paths = list(self.im_dir.glob("*"))
@@ -61,8 +69,46 @@ class DataLoader():
             self.n_im = len(self.all_im_paths)
 
         elif dataset == "malaga":
-            message = "TODO: implement data loader for malaga"
-            raise NotImplementedError(message)
+            base_path = Path.cwd().joinpath("datasets", 
+                                            "malaga-urban-dataset-extract-07")
+            k_matrix_path = base_path.joinpath("camera_params_raw_1024x768.txt")
+            k_lc = np.zeros((3, 3)).astype(str)    # left camera intrinsics
+            k_rc = np.zeros((3, 3)).astype(str)
+            self.dist = np.zeros(2).astype(str)    # T1, T2 distortion parameters
+            with open(k_matrix_path) as txt_file:
+                content = txt_file.readlines()
+                
+                k_lc[0, 2] = content[8][13:23]     # u0 left camera
+                k_lc[1, 2] = content[9][13:23]     # v0 left camera
+                k_lc[0, 0] = content[10][13:23]    # alpha_u left camera
+                k_lc[1, 1] = content[11][13:23]    # alpha_v left camera
+
+                k_rc[0, 2] = content[17][13:23]    # u0 right camera
+                k_rc[1, 2] = content[18][13:23]    # v0 right camera
+                k_rc[0, 0] = content[19][13:23]    # alpha_u right camera
+                k_rc[1, 1] = content[20][13:23]    # alpha_v right camera
+
+                self.dist[0] = content[12][14:28]  # T1
+                self.dist[1] = content[12][29:42]  # T2
+            k_lc = k_lc.astype(float)
+            k_rc = k_rc.astype(float)
+            k_rect = 0.5 * (k_lc + k_rc)           # the average the K'es
+            self.dist = self.dist.astype(float)
+            if malaga_rect:
+                self.K = k_rect
+                self.im_dir = base_path.joinpath("malaga-urban-dataset-"
+                                                 +"extract-07_rectified_1024"
+                                                 +"x768_Images")
+            else:
+                self.K = k_lc
+                self.im_dir = base_path.joinpath("Images")
+
+            self.all_im_paths = list(self.im_dir.glob("*_left.jpg"))
+            self.n_im = len(self.all_im_paths)
+
+        else:  # The input is not in ("kitti", "parking", "malaga"):
+            raise ValueError("Did not specify one of 'kitti', 'parking'"
+                             +" or 'malaga'")
 
 
     def __getitem__(self, index):
@@ -260,4 +306,4 @@ class Bootstrap():
 
         
 if __name__ == "__main__":
-    dl = DataLoader("parking")
+    pass
