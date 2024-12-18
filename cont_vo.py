@@ -34,10 +34,10 @@ class VO:
         self.distortion_coefficients = None
 
         self.Pi_1, self.Xi_1, self.Ci_1, initial_pose = bootstrap_obj.get_points()       # landmarks, keypoints
-        self.F_i = self.Ci_1.copy()
+        self.Fi_1 = self.Ci_1.copy()
 
-        self.Ti_1 = np.tile(initial_pose.reshape(-1), (len(self.Ci_1), 1))
-
+        self.Ti_1 = np.tile(np.column_stack((np.identity(3), np.zeros((3,1)))).reshape(-1), (len(self.Ci_1), 1))
+        
         self.max_keypoints = max_keypoints
 
         # Setting information from bootstrapping
@@ -97,21 +97,33 @@ class VO:
         # Step 3: Run KLT on candidate keypoints
         C_i, C_i_tracked = self.run_KLT(img_i_1, img_i, self.Ci_1, "C", debug)
 
-        # Step 4: Calculate angles between each tracked C_i
-        for candidate_i, candidate_i_1 in zip(C_i, self.Ci_1[C_i_tracked]):
+        # Step 4: Update T_i with only successfully tracked stuff
+        # TODO: Can we do this without a for loop?
+        for i in range(self.Ti_1[C_i_tracked].shape[0]):
+            homogenous_transform_Ci_1__w = np.row_stack((self.Ti_1[i].reshape(3,4), np.array([0,0,0,1]))) # from world to Ci_1
+            homogenous_transform_C_i__C_i_w = np.row_stack((transformation_i_1_to_i, np.array([0,0,0,1]))) # from Ci_1 to Ci
+            transformation_first_sighting_to_i = homogenous_transform_C_i__C_i_w @ homogenous_transform_Ci_1__w
+            self.Ti_1[i] = transformation_first_sighting_to_i[:3,:].reshape(-1)
+
+        # Step 5: Calculate angles between each tracked C_i
+        # TODO: Can we do this without a for loop?
+        for candidate_i, candidate_f, transformation in zip(C_i, self.Fi_1[C_i_tracked], self.Ti_1[C_i_tracked]):
+            R_cf = transformation.reshape(3,4)[:,:3]
+            c_t_cf = transformation.reshape(3,4)[:,3] # column vector
+
             vector_to_candidate_i = np.linalg.inv(self.K) @ np.append(candidate_i, 1)[:, None]
             angle_between_baseline_and_point_i = np.arccos(
-                                                            np.dot(c_t_cw.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
-                                                            (np.linalg.norm(c_t_cw) * np.linalg.norm(vector_to_candidate_i))
+                                                            np.dot(c_t_cf.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
+                                                            (np.linalg.norm(c_t_cf) * np.linalg.norm(vector_to_candidate_i))
                                                             )
-            vector_to_candidate_i_1 = np.linalg.inv(self.K) @ np.append(candidate_i_1, 1)[:, None]
-            w_t_wc = - np.linalg.inv(R_cw) @ c_t_cw
-            angle_between_baseline_and_point_i_1 = np.arccos(
-                                                            np.dot(w_t_wc.reshape(-1), vector_to_candidate_i_1.reshape(-1)) / 
-                                                            (np.linalg.norm(w_t_wc) * np.linalg.norm(vector_to_candidate_i_1))
+            vector_to_candidate_f = np.linalg.inv(self.K) @ np.append(candidate_f, 1)[:, None]
+            f_t_fc = - np.linalg.inv(R_cf) @ c_t_cf
+            angle_between_baseline_and_point_f = np.arccos(
+                                                            np.dot(f_t_fc.reshape(-1), vector_to_candidate_f.reshape(-1)) / 
+                                                            (np.linalg.norm(f_t_fc) * np.linalg.norm(vector_to_candidate_f))
                                                             )
             
-            angle_between_points = np.pi - angle_between_baseline_and_point_i_1 - angle_between_baseline_and_point_i
+            angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
             print(angle_between_points)
             if debug:
                 fig, (ax1, ax2) = plt.subplots(1,2)
@@ -119,7 +131,7 @@ class VO:
                 ax2.imshow(img_i, cmap="grey")
 
                 a, b = candidate_i.ravel()
-                c, d = candidate_i_1.ravel()
+                c, d = candidate_f.ravel()
                 # cv2.line(mask, (int(a), int(b)), (int(c), int(d)), (0, 255, 0), 2)
                 ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
                 ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
@@ -156,10 +168,11 @@ class VO:
 
         # Step 5: Add candidates that match thresholds to sets
             
-        # Step 6: 
+        # Step 6: Update state vectors
             
             
-        # update our state vectors
+        # Step 7: Return pose
+
 
 
     def draw_keypoint_tracking(self):
