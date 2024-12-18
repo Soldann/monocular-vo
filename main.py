@@ -10,7 +10,10 @@ from initialise_vo import Bootstrap, DataLoader
 dl = DataLoader("kitti")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
-p_new = vo.process_frame(dl[2], dl[3], debug=True)
+
+for image in dl[2:]:
+    p_new = vo.process_frame(dl[2], dl[3], debug=False)
+    print(p_new)
 # vo.next_image()
 # vo.track_keypoints()
 # vo.draw_keypoint_tracking()

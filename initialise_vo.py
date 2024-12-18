@@ -112,8 +112,12 @@ class DataLoader():
 
 
     def __getitem__(self, index):
-        img_path = str(self.all_im_paths[index])
-        return cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self.all_im_paths))
+            return (self[i] for i in range(start, stop, step))
+        else:
+            img_path = str(self.all_im_paths[index])
+            return cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
 
 
 class Bootstrap():
