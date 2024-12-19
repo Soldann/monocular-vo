@@ -54,7 +54,7 @@ class VO:
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
 
 
-    def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=True):
+    def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
         """
             Wrapper function for CV2 KLT
         """
@@ -97,7 +97,7 @@ class VO:
 
         # Step 2: Run PnP to get pose for the new frame
         
-        success, r_cw, c_t_cw = cv2.solvePnP(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_ITERATIVE) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw = cv2.solvePnP(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
         R_cw, _ = cv2.Rodrigues(r_cw) # rotation vector world to camera frame
         self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))

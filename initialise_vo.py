@@ -198,7 +198,7 @@ class Bootstrap():
         # Essential matrix by 8p algorithm
         points1 = np.array([kp1[match[0].queryIdx].pt for match in good])
         points2 = np.array([kp2[match[0].trainIdx].pt for match in good])
-        self.E, ransac_inliers = cv2.findEssentialMat(points1, points2, self.K, cv2.FM_RANSAC, 0.99, 2)
+        self.E, ransac_inliers = cv2.findEssentialMat(points1, points2, self.K, method=cv2.FM_RANSAC, prob=0.999, threshold=1)
         ransac_inliers = ransac_inliers.astype(np.bool_).reshape(-1)
         self.keypoints = points2[ransac_inliers]
         self.candidate_points = points2[~ransac_inliers]
@@ -267,7 +267,7 @@ class Bootstrap():
         """
 
         fig, ax = plt.subplots()
-        im = cv2.imread(self.data_loader[self.init_frames[-1]], cv2.IMREAD_GRAYSCALE)
+        im = self.data_loader[self.init_frames[-1]]
         ax.imshow(im, cmap="grey")
 
         c_map = plt.get_cmap(self.c_map_name)
