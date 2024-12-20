@@ -2,9 +2,16 @@ import cv2
 import numpy as np
 from initialise_vo import Bootstrap
 import matplotlib.pyplot as plt
+from enum import Enum
+from typing import List, Optional
 from utils import *
 
 class VO:
+
+    class Debug(Enum):
+        KLT = 0
+        TRIANGULATION = 1
+        SIFT = 2
 
     def __init__(self, bootstrap_obj: Bootstrap, max_keypoints=100):
         """
@@ -90,9 +97,25 @@ class VO:
         return tracked_points, tracked
 
 
-    def process_frame(self, img_i, debug=False):
+    def process_frame(self, img_i: np.array, debug: Optional[List[Debug]] = None):
+        """
+            Runs the continuous pipeline on the image provided, updating internal state wherever necessary
+
+            ### Parameters
+            1. img_i : np.array
+                - numpy image to use as the next frame input
+
+            2. debug : Optional[List[Debug]]
+                - Provide a list of elements from the Enum VO.Debug to trigger additional prints
+                  and visualizations useful for debugging.
+
+            ### Returns
+            - bool
+                - True for inliers and False for outliers
+        """
+
         # Step 1: run KLT  on the points P
-        P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P")
+        P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P", self.Debug.KLT in debug if debug else False)
         
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
@@ -112,7 +135,7 @@ class VO:
         w_t_w_Ci = - R_w_Ci @ self.T_Ci_1__w[:3,3, None] # tranformation vector from Ci to world in world frame, vertical vector
 
         # Step 3: Run KLT on candidate keypoints
-        C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C")
+        C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C", self.Debug.KLT in debug if debug else False)
 
         # Step 4: Calculate angles between each tracked C_i
         # TODO: Can we do this without a for loop?
@@ -162,7 +185,7 @@ class VO:
                     (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
             )
             
-            if debug and point_index ==  np.where(C_i_tracked)[0][0]:
+            if debug and self.Debug.TRIANGULATION in debug and point_index ==  np.where(C_i_tracked)[0][0]:
                 print(angle_between_points)
                 print(angle_between_points_with_triangulation)
 
@@ -230,7 +253,8 @@ class VO:
                     candidates_to_add.append(new_point.pt)
                     poses_to_add.append(self.T_Ci_1__w.flatten())
 
-            print(len(candidates_to_add))
+            if debug and self.Debug.SIFT in debug:
+                print(len(candidates_to_add))
 
             self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
             self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))

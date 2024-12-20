@@ -14,7 +14,7 @@ b.draw_all()
 print(b.transformation_matrix)
 
 for image in dl[3:]:
-    p_new = vo.process_frame(image, debug=False)
+    p_new = vo.process_frame(image, debug=[VO.Debug.KLT])
     print(p_new)
 # vo.next_image()
 # vo.track_keypoints()
