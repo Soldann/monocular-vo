@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from initialise_vo import Bootstrap
 import matplotlib.pyplot as plt
-from utils import inverse_transformation, multiply_transformation
+from utils import *
 
 class VO:
 
@@ -53,6 +53,8 @@ class VO:
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
 
+        self.sift = cv2.SIFT_create()
+        self.sift_keypoint_similarity_threshold = 10
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
         """
@@ -201,7 +203,7 @@ class VO:
                     ax3.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
 
                 plt.show()
-                
+
         # Step 5: Add candidates that match thresholds to sets
             if angle_between_points_with_triangulation >= self.angle_threshold:
                 # TODO: Don't use append
@@ -209,15 +211,32 @@ class VO:
                 self.Xi_1 = np.append(self.Xi_1, (R_w_Ci @ triangulated_point + w_t_w_Ci).T, axis=0)
                 C_i_tracked[point_index] = False # remove this point from tracking
 
-        # Step 6: Run SIFT if C is too small to add new candidates
-        # TODO: Implement this step
-
         # Step 7: Update state vectors
         self.Ci_1 = C_i[C_i_tracked]
         self.Fi_1 = self.Fi_1[C_i_tracked]
         self.Ti_1 = self.Ti_1[C_i_tracked]
         self.img_i_1 = img_i
-            
+
+        # Step 6: Run SIFT if C is too small to add new candidates
+        # TODO: Implement this step
+        if True or len(self.Ci_1) <= self.max_keypoints * 0.3:
+            new_candidates = self.sift.detect(img_i, None)
+
+
+            candidates_to_add = []
+            poses_to_add = []
+            for new_point in new_candidates:
+                if is_new_keypoint(new_point, np.row_stack((self.Pi_1, self.Ci_1)), self.sift_keypoint_similarity_threshold):
+                    candidates_to_add.append(new_point.pt)
+                    poses_to_add.append(self.T_Ci_1__w.flatten())
+
+            print(len(candidates_to_add))
+
+            self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
+            self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
+            self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
+
+
         # Step 8: Return pose
         return self.T_Ci_1__w
 
@@ -227,7 +246,7 @@ class VO:
         Call after track_features. Visualises the features tracks over the
         last image pair
         """
-        
+
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.imshow(self.img_i, cmap="gray")
         u_coord = np.column_stack((self.Pi_1[:, 0], self.Pi[:, 0])) 

@@ -44,6 +44,28 @@ def check_inside_FOV(alpha, w, h, p):
     return np.all(product >= 0, axis=0)
 
 
+def is_new_keypoint(cv2keypoint, existing_keypoints: np.array, threshold):
+    """
+    Determine if the cv2 keypoint passed in is new or not
+
+    ### Parameters
+    1. cv2keypoint : cv2.Keypoint object
+        - keypoint to compare, usually result of feature detector
+    2. existing_keypoints : np.array (N x 2)
+        - array of existing keypoints to compare against
+    3. threshold : float
+        the threshold value for two keypoints to be considered the same
+
+    ### Returns
+    - bool
+        - True for inliers and False for outliers
+    """
+    for point in existing_keypoints:
+        distance = np.linalg.norm(cv2keypoint.pt - point)
+        if distance < threshold:
+            return False
+    return True
+
 def median_outliers(p: np.array, x_tol=None, y_tol=None, z_tol=15) -> np.array:
     """
     Check if the points are outliers by how far they are from the median
