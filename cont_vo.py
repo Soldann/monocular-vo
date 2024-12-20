@@ -92,12 +92,16 @@ class VO:
         # Step 1: run KLT  on the points P
         P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P")
         
-        self.Pi_1 = P_i[P_i_tracked] # Update Pi with the poinits we successfully tracked
+        self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
 
         # Step 2: Run PnP to get pose for the new frame
         
-        success, r_cw, c_t_cw = cv2.solvePnP(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        ransac_inliers = ransac_inliers.flatten()
+        self.Pi_1 = self.Pi_1[ransac_inliers] # Update Pi with ransac
+        self.Xi_1 = self.Xi_1[ransac_inliers] # Update Xi with ransac
+
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
         R_cw, _ = cv2.Rodrigues(r_cw) # rotation vector world to camera frame
         self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))
