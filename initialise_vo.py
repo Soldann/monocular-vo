@@ -51,6 +51,9 @@ class DataLoader():
             # Number of images in the dataset
             self.n_im = len(self.all_im_paths)
 
+            # Initial frames for bootstrapping
+            self.init_frames = (0, 2)
+
         elif dataset == "parking":
             base_path = Path.cwd().joinpath("datasets", "parking")
             
@@ -67,6 +70,9 @@ class DataLoader():
             self.all_im_paths = list(self.im_dir.glob("*"))
 
             self.n_im = len(self.all_im_paths)
+
+            # Initial frames for bootstrapping:
+            self.init_frames = (0, 5)
 
         elif dataset == "malaga":
             base_path = Path.cwd().joinpath("datasets", 
@@ -106,6 +112,9 @@ class DataLoader():
             self.all_im_paths = list(self.im_dir.glob("*_left.jpg"))
             self.n_im = len(self.all_im_paths)
 
+            # Initial frames for bootstrapping:
+            self.init_frames = (0, 3)
+
         else:  # The input is not in ("kitti", "parking", "malaga"):
             raise ValueError("Did not specify one of 'kitti', 'parking'"
                              +" or 'malaga'")
@@ -122,7 +131,7 @@ class DataLoader():
 
 class Bootstrap():
 
-    def __init__(self, data_loader: DataLoader, init_frames: tuple = (0, 2),
+    def __init__(self, data_loader: DataLoader, init_frames: tuple = None,
                  outlier_tolerance=(None, None, 15)):
         """
         Get an initial point cloud
@@ -130,10 +139,11 @@ class Bootstrap():
         ### Parameters
         1. data_loader : DataLoader
             - DataLoader instance initialised with one of the three datasets
-        2. init_frames : Tuple[int, int], (default (0, 2))
+        2. init_frames : Tuple[int, int], (default None)
             - Tuple of two integers that specify what images are used to
               initialise the point cloud. The integers refer to the ordering
-              of the files in the directory.
+              of the files in the directory. By default (and when None is passed)
+              the suggestions by the dataloader are used (data_loader.init_frames)
         3. outlier_tolerance : tuple(x_tol: float, y_tol: float, z_tol: float)
             - For overwriting the tolerance values on utils.median_outliers()
               during the get_points() method. Pass None instead of a float 
@@ -145,6 +155,7 @@ class Bootstrap():
         self.init_frames = init_frames
         self.K = data_loader.K
         self.outlier_tolerance = outlier_tolerance
+        self.init_frames = data_loader.init_frames
         
         # Filled in by get_points()
         self.E = None
