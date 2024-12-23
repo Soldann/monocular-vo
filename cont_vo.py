@@ -41,7 +41,8 @@ class VO:
         self.K = bootstrap_obj.data_loader.K
         self.distortion_coefficients = None
 
-        self.Pi_1, self.Xi_1, self.Ci_1, self.T_Ci_1__w = bootstrap_obj.get_points() # landmarks, keypoints, candidate points, transform world to camera position i-1
+        # landmarks, keypoints, candidate points, transform world to camera position i-1
+        self.Pi_1, self.Xi_1, self.Ci_1, self.T_Ci_1__w = bootstrap_obj.get_points() 
         self.Fi_1 = self.Ci_1.copy()
 
         self.Ti_1 = np.tile(self.T_Ci_1__w.reshape(-1), (len(self.Ci_1), 1))
@@ -110,8 +111,16 @@ class VO:
                   and visualizations useful for debugging.
 
             ### Returns
-            - bool
-                - True for inliers and False for outliers
+            - pose : np.array
+                - A (3 x 4) np.array indicating the most recent camera pose. Columns 1 to 3 give
+                R_cw, column 4 gives c_t_cw
+            - X : np.array
+                - Np.array containing the landmarks currently used for camera
+                localisation on its rows. (n x 3). The landmarks are given in
+                the world coordinate system.
+            - P : np.array
+                - The current keypoints in set P belonging to the landmarks
+                X. Shape (n x 2)
         """
 
         # Step 1: run KLT  on the points P
@@ -261,8 +270,9 @@ class VO:
             self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
 
 
-        # Step 8: Return pose
-        return self.T_Ci_1__w
+        # Step 8: Return pose, P, and X. Returning the i-1 version since the
+        # sets were updated already
+        return self.T_Ci_1__w, self.Pi_1, self.Xi_1
 
 
     def draw_keypoint_tracking(self):

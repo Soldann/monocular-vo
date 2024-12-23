@@ -5,16 +5,21 @@ from pathlib import Path
  
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
+from utils import DrawTrajectory
 
 
 dl = DataLoader("parking")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
-b.draw_all()
+# b.draw_all()
+dt = DrawTrajectory(b.transformation_matrix, b.triangulated_points, 
+                    b.keypoints, dl[dl.init_frames[-1]])
 print(b.transformation_matrix)
 
 for image in dl[3:]:
-    p_new = vo.process_frame(image, debug=[VO.Debug.KLT])
+    # debug=[VO.Debug.KLT]
+    p_new, pi, xi = vo.process_frame(image, debug=False)
+    dt.update_data(p_new, pi, xi, image)
     print(p_new)
 # vo.next_image()
 # vo.track_keypoints()

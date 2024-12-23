@@ -3,8 +3,8 @@ File of functions that are needed for both continuous operation and
 bootstrapping
 """
 
-# from tqdm import tqdm
 import numpy as np
+from matplotlib import pyplot as plt
 
 def check_inside_FOV(alpha, w, h, p):
     """
@@ -197,3 +197,151 @@ def triangulate_points(k, r, t, p1, p2):
 
     return big_p
 
+
+class DrawTrajectory():
+
+    def __init__(self, t: np.array, x: np.array, p: np.array, 
+                 im: np.array, mark_depth=True):
+        """
+        Initialise with the bootstrap
+
+        ### Parameters
+        1. t : np.array shape (3 x 4)
+            - The transformation matrix from world coordinates to the 
+              second bootstrapping frame (aka. the pose)
+        2. x : np.array shape (n x 3)
+            - The landmarks extracted during bootstrapping
+        3. p : np.array (n x 2)
+            - The keypoints extracted during bootstrapping
+        4. im : np.array
+            - The second image used during bootstrapping
+        5. mark_depth : bool (default True)
+            - Whether to translate the landmarks into the camera frame
+            and show their depth (z_c component) by colour coding
+        """
+        
+        self.mark_depth = mark_depth
+        c_map = plt.get_cmap("nipy_spectral")  # cmap style (if mark_depth)
+
+        # Computing the location of the camera, saving the x and z components
+        c_R_cw = t[:, :3]
+        c_t_cw = t[:, -1]
+        w_t_wc = -1 * c_R_cw.T @ c_t_cw
+        self.w_t_wc_x = [w_t_wc[0]]
+        self.w_t_wc_z = [w_t_wc[2]]
+
+        # Computing the depth component
+        if mark_depth:
+            z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c
+
+        # Plot settings
+        plt.ion()
+        self.fig, axs = plt.subplot_mosaic(
+            [["u", "u"], ["l", "r"]], 
+            figsize=(10, 8),                     # (width x height)
+            layout="constrained"
+                                           )
+        self.u = axs["u"]
+        self.l = axs["l"]
+        self.r = axs["r"]
+
+        # Upper plot:
+        self.u_im = self.u.imshow(im, cmap="grey")
+        if mark_depth:
+            self.u_keypoints = self.u.scatter(p[:, 0], p[:, 1], marker="o", 
+                                              alpha=0.5, cmap=c_map, c=z_c, s=2)
+            cbar = self.fig.colorbar(self.u_keypoints, orientation="vertical")
+            cbar.set_label("Distance from camera, SFM units")
+        else:
+            self.u_keypoints = self.u.scatter(p[:, 0], p[:, 1], marker="o", 
+                                              alpha=0.5, c="g", s=2)
+
+        # Right: xz landmark graphic
+        if mark_depth:
+            self.r_landmarks = self.r.scatter(x[:, 0], x[:, 2], marker="o", 
+                                              alpha=0.5, cmap=c_map, c=z_c)
+        else:
+            self.r_landmarks = self.r.scatter(x[:, 0], x[:, 2], marker="o", 
+                                              alpha=0.5, c="g")
+        self.r_pos = self.r.plot(w_t_wc[0], w_t_wc[2], marker="x")[0]
+        self.r.set_xlabel("$X_c$ - SFM units")
+        self.r.set_ylabel("$Z_c$ - SFM units")
+        self.r.grid(visible=True, axis="both")
+
+        # Left: xz camera position
+        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_z, marker="o")[0]
+        self.l.grid(visible=True, axis="both")
+        
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+    def update_data(self, t: np.array, p: np.array, x: np.array,
+                     im: np.array):
+        """
+        Update the plot
+
+        ### Parameters
+        1. t : np.array
+            - Latest transformation matrix from homogeneous world coordinates
+            to (X, Y, Z) in camera coordinates. A (3 x 4) matrix
+        2. p : np.array
+            - The current keypoints in set Pi belonging to the landmarks
+            xi. Shape (n x 2)
+        3. x : np.arrays
+            - Np.array containing the landmarks currently used for camera
+            localisation on its rows. (n x 3). The landmarks are given in
+            the world coordinate system.
+        4. im : np.array
+            - Image
+        """
+
+        # Computing the current location of the camera, saving x and z comp.
+        c_R_cw = t[:, :3]
+        c_t_cw = t[:, -1]
+        w_t_wc = -1 * c_R_cw.T @ c_t_cw
+        self.w_t_wc_x.append(w_t_wc[0])
+        self.w_t_wc_z.append(w_t_wc[2])
+
+        # Computing the depth component
+        if self.mark_depth:
+            z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c
+
+        # Updating the data in the figure: upper plot
+        self.u_im.set(data=im)
+        self.u_keypoints.set_offsets(p)
+        if self.mark_depth:
+            self.r_landmarks.set_array(z_c)  # Upadte the colour mapping
+            self.u_keypoints.set_array(z_c)
+
+        # Updating the data in the figure: right
+        self.r_pos.set_data([w_t_wc[0]], [w_t_wc[2]])
+        self.r_landmarks.set_offsets(np.c_[x[:, 0], x[:, 2]])
+        if self.mark_depth:
+            self.r_landmarks.set_array(z_c)  # Upadte the colour mapping
+        
+        # Updating the data in the figure: left
+        self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
+
+        # Compute the limits for the plot; same scale for both axes (left plot)
+        l_xmin, l_xmax = min(self.w_t_wc_x) - 1, max(self.w_t_wc_x) + 1
+        l_zmin, l_zmax = min(self.w_t_wc_z) - 1, max(self.w_t_wc_z) + 1
+        max_range = max(l_xmax - l_xmin, l_zmax - l_zmin)
+        mid_x = 0.5 * (l_xmin + l_xmax)
+        mid_z = 0.5 * (l_zmin + l_zmax)
+        self.l.set_xlim(mid_x - 0.5 * max_range, mid_x + 0.5 * max_range)
+        self.l.set_ylim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
+
+        #TODO: figure out how to make the right plot move and adapt in 
+        # scale
+        
+        # Making sure the landmark positions are visible:
+        r_xmax = max(x[:, 0].max(), w_t_wc[0]) + 1
+        r_xmin = min(x[:, 0].min(), w_t_wc[0]) - 1
+        r_zmax = max(x[:, 2].max(), w_t_wc[2]) + 1
+        r_zmin = min(x[:, 2].min(), w_t_wc[2]) - 1
+        self.r.set_xlim(r_xmin, r_xmax)
+        self.r.set_ylim(r_zmin, r_zmax)
+
+        # Visualise
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
