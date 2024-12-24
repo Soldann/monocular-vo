@@ -58,7 +58,7 @@ class VO:
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
         
         # angle threshold
-        self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
+        self.angle_threshold = 0.09991679144388552/2 # Assuming baseline is 10% of the depth
 
         self.sift = cv2.SIFT_create()
         self.sift_keypoint_similarity_threshold = 10
@@ -122,7 +122,7 @@ class VO:
 
         # Step 2: Run PnP to get pose for the new frame
         
-        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP, confidence=0.999) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
         ransac_inliers = ransac_inliers.flatten()
         self.Pi_1 = self.Pi_1[ransac_inliers] # Update Pi with ransac
         self.Xi_1 = self.Xi_1[ransac_inliers] # Update Xi with ransac

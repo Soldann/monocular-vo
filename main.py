@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from pathlib import Path
+from utils import *
  
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
@@ -13,9 +14,44 @@ vo = VO(b)
 b.draw_all()
 print(b.transformation_matrix)
 
-for image in dl[3:]:
-    p_new = vo.process_frame(image, debug=[VO.Debug.KLT])
-    print(p_new)
+path = []
+fig = plt.figure(figsize=(14, 5))
+ax_3d = fig.add_subplot(122, projection='3d')
+ax_img = fig.add_subplot(121)
+
+for image in dl[dl.init_frames[1]:]:
+    new_transform = vo.process_frame(image, debug=[VO.Debug.TRIANGULATION])
+
+    path.append(inverse_transformation(new_transform))
+
+    np_path = np.array(path)
+
+    ax_img.clear()
+    ax_3d.clear()
+
+    # plot path
+    ax_3d.view_init(elev=-90, azim=0, roll=-90)
+    ax_3d.set_xlabel("X")
+    ax_3d.set_ylabel("Y")
+    ax_3d.set_zlabel("Z")
+    ax_3d.scatter(vo.Xi_1[:, 0], vo.Xi_1[:, 1], 
+            vo.Xi_1[:, 2], marker='o', s=5, 
+            c="red", alpha=0.5)
+    ax_3d.plot(np_path[:,0,3], np_path[:,1,3], 
+            np_path[:,2,3], marker='o', 
+            c="blue", alpha=0.5)
+    # plot image
+    ax_img.imshow(image, cmap="grey")
+
+    c_map = plt.get_cmap("nipy_spectral")
+    sc = ax_img.scatter(vo.Pi_1[:, 0], vo.Pi_1[:, 1], s=4, 
+                    c="red", alpha=0.5)
+    sc = ax_img.scatter(vo.Ci_1[:, 0], vo.Ci_1[:, 1], s=4, 
+                    c="green", alpha=0.5)
+
+
+    print(new_transform)
+    plt.pause(1)
 # vo.next_image()
 # vo.track_keypoints()
 # vo.draw_keypoint_tracking()

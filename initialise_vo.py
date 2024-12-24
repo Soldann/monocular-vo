@@ -72,7 +72,7 @@ class DataLoader():
             self.n_im = len(self.all_im_paths)
 
             # Initial frames for bootstrapping:
-            self.init_frames = (0, 5)
+            self.init_frames = (20, 23)
 
         elif dataset == "malaga":
             base_path = Path.cwd().joinpath("datasets", 
@@ -226,18 +226,6 @@ class Bootstrap():
                                                          points1[ransac_inliers].T, points2[ransac_inliers].T)
         self.triangulated_points = self.triangulated_points / self.triangulated_points[3]
         self.triangulated_points = self.triangulated_points[:3, :].T
-
-        # Outlier removal: checking if the points are inside the FOV
-        h, w = im1.shape
-        alpha = self.K[0, 0]
-        in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
-        self.triangulated_points = self.triangulated_points[in_FOV]
-        self.keypoints = self.keypoints[in_FOV]
-
-        # Outlier removal: remove points whose z-value greatly deviates from the median
-        z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
-        self.triangulated_points = self.triangulated_points[z_mask]
-        self.keypoints = self.keypoints[z_mask]
 
         # Outlier removal: checking if the points are inside the FOV
         h, w = im1.shape
