@@ -12,11 +12,10 @@ dl = DataLoader("parking")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
 # b.draw_all()
-dt = DrawTrajectory(b.transformation_matrix, b.triangulated_points, 
-                    b.keypoints, dl[dl.init_frames[-1]])
+dt = DrawTrajectory(b)
 print(b.transformation_matrix)
 
-for image in dl[3:]:
+for image in dl[5:]:
     # debug=[VO.Debug.KLT]
     p_new, pi, xi = vo.process_frame(image, debug=False)
     dt.update_data(p_new, pi, xi, image)
