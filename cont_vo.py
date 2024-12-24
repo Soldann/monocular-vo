@@ -26,6 +26,10 @@ class VO:
               marks and the positions of the corresponding keypoints
         """
 
+        # Setting information from bootstrapping
+        self.dl = bootstrap_obj.data_loader                              # data loader
+        self.img_i_1 = self.dl[bootstrap_obj.init_frames[-1]]
+
         # The current state of the pipeline
         #   K      Intrinsic matrix of camera
         #
@@ -46,12 +50,9 @@ class VO:
         self.Fi_1 = self.Ci_1.copy()
 
         self.Ti_1 = np.tile(self.T_Ci_1__w.reshape(-1), (len(self.Ci_1), 1))
+        self.ids = [self.dl.init_frames[-1]] * len(self.Ci_1)
         
         self.max_keypoints = max_keypoints
-
-        # Setting information from bootstrapping
-        self.dl = bootstrap_obj.data_loader                              # data loader
-        self.img_i_1 = self.dl[bootstrap_obj.init_frames[-1]]
 
         # Parameters Lucas Kanade
         self.lk_params = dict( winSize  = (15, 15),
@@ -61,7 +62,7 @@ class VO:
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
 
-        self.sift = cv2.SIFT_create()
+        self.sift = cv2.SIFT_create(nfeatures=100)
         self.sift_keypoint_similarity_threshold = 10
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
@@ -202,28 +203,34 @@ class VO:
                 gs = fig.add_gridspec(2, 2)
                 ax1 = fig.add_subplot(gs[0, 0])
                 ax2 = fig.add_subplot(gs[0, 1])
+                ax3 = fig.add_subplot(gs[1, 0])
 
                 # Plot image and KLT results for candidate keypoint tracking
                 ax1.imshow(self.img_i_1, cmap="grey")
                 ax2.imshow(img_i, cmap="grey")
+                ax3.imshow(self.dl[self.ids[point_index]], cmap="grey")
 
                 a, b = candidate_i.ravel()
-                c, d = candidate_f.ravel()
+                c, d = self.Ci_1[point_index].ravel()
+                e, f = candidate_f.ravel()
                 ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
                 ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
-                
+                ax3.plot((a, c), (b, d), '-', linewidth=2, c="pink")
+
                 ax1.scatter(c, d, s=5, c="green", alpha=0.5)
                 ax2.scatter(a, b, s=5, c="red", alpha=0.5)
+                ax3.scatter(e, f, s=5, c="green", alpha=0.5)
                 ax1.set_title(f"C_i in Old Image")
                 ax2.set_title(f"C_i in New Image")
+                ax3.set_title(F"C_i in Original Image")
 
                 # Plot triangulation results
-                ax3 = fig.add_subplot(gs[1:, :], projection='3d')
-                ax3.view_init(elev=-90, azim=0, roll=-90)
-                ax3.set_box_aspect((20, 10, 15)) # aspect_x, aspect_y, aspect_z
-                ax3.set_xlabel("X")
-                ax3.set_ylabel("Y")
-                ax3.set_zlabel("Z")
+                ax4 = fig.add_subplot(gs[1, 1], projection='3d')
+                ax4.view_init(elev=-90, azim=0, roll=-90)
+                ax4.set_box_aspect((20, 10, 15)) # aspect_x, aspect_y, aspect_z
+                ax4.set_xlabel("X")
+                ax4.set_ylabel("Y")
+                ax4.set_zlabel("Z")
                 points_to_plot = [
                     (triangulated_point_in_i, "red"),
                     (np.array([0,0,0]), "black"), # camera i center
@@ -232,7 +239,7 @@ class VO:
                     (vector_to_candidate_i, "magenta"),
                 ]
                 for point, colour in points_to_plot:
-                    ax3.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
+                    ax4.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
 
                 plt.show()
 
@@ -251,9 +258,8 @@ class VO:
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
-        if True or len(self.Ci_1) <= self.max_keypoints * 0.3:
+        if True or len(self.Ci_1) <= self.max_keypoints:
             new_candidates = self.sift.detect(img_i, None)
-
 
             candidates_to_add = []
             poses_to_add = []
@@ -268,6 +274,8 @@ class VO:
             self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
             self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
             self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
+            if self.Debug.TRIANGULATION:
+                self.ids.extend([self.ids[-1]] * len (poses_to_add))
 
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
