@@ -221,12 +221,20 @@ class VO:
                     np.dot(triangulated_point_w_to_f.reshape(-1), triangulated_point_w_to_ci.reshape(-1)) / 
                     (np.linalg.norm(triangulated_point_w_to_f) * np.linalg.norm(triangulated_point_w_to_ci))
             )
+
+            """
+            Here is some code that **should** do the same as above, just with less numerical error? idk but the result is close to the the triangulation method.
+            """
+            dir_i = vector_to_candidate_i / np.linalg.norm(vector_to_candidate_i) # Normalize
+            dir_f = vector_to_candidate_f / np.linalg.norm(vector_to_candidate_f)
+            dir_f = R_cf @ dir_f # Rotate to correct camera frame
+            angle_between_points_luca = np.arccos(np.dot(dir_i.reshape(-1), dir_f.reshape(-1))) # Angle between the two directions
             
             if debug and self.Debug.TRIANGULATION in debug and point_index ==  np.where(C_i_tracked)[0][0]:
                 print("Triangle method: ", angle_between_points)
                 print("Triangulation method: ", angle_between_points_with_triangulation)
                 print("Triangulation method in world frame: ", angle_between_points_with_triangulation_in_world)
-
+                print("Direction method: ", angle_between_points_luca)
                 fig = plt.figure(figsize=(14, 5))
                 gs = fig.add_gridspec(2, 2)
                 ax1 = fig.add_subplot(gs[0, 0])
@@ -272,7 +280,7 @@ class VO:
                 plt.show()
 
         # Step 5: Add candidates that match thresholds to sets
-            if angle_between_points_with_triangulation_in_world >= self.angle_threshold:
+            if angle_between_points_luca >= self.angle_threshold:
                 # TODO: Don't use append
                 self.Pi_1 = np.append(self.Pi_1, candidate_i[None,:], axis=0)
                 self.Xi_1 = np.append(self.Xi_1, triangulated_point_w.reshape(1,-1), axis=0)
