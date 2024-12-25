@@ -26,6 +26,9 @@ class DataLoader():
               left distorted images and the left camera's intrinsics
         """
         
+        # Keep name string reference when saving files during visualisation
+        self.dataset_str = dataset
+        
         if dataset == "kitti":
             base_path = Path.cwd().joinpath("datasets", "kitti")
             

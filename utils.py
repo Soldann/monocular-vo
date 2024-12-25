@@ -6,6 +6,7 @@ bootstrapping
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
+from pathlib import Path
 
 def check_inside_FOV(alpha, w, h, p):
     """
@@ -201,19 +202,23 @@ def triangulate_points(k, r, t, p1, p2):
 
 class DrawTrajectory():
 
-    def __init__(self, b):
+    def __init__(self, b, save=False):
         """
         Initialise with the bootstrap
 
         ### Parameters
         1. b : initialise_vo.Bootstrap
-        - Bootstrapping instance that provides:
-            - t : np.array. The estimated pose of the camera at the last 
-            bootstrapping frame
-            - p : np.array. The keypoints in P after bootstrapping
-            - x : np.array. The landmarks in X after bootstrapping
-            - im : np.array. Provided through b's dataloader; the last
-            bootstrapping frame
+            - Bootstrapping instance that provides:
+                - t : np.array. The estimated pose of the camera at the last 
+                bootstrapping frame
+                - p : np.array. The keypoints in P after bootstrapping
+                - x : np.array. The landmarks in X after bootstrapping
+                - im : np.array. Provided through b's dataloader; the last
+                bootstrapping frame
+        2. save : bool
+            - Specify whether the plots are to be saved in a dedicated folder
+            for later in-depth inspection. When save is true, the plots are
+            not displayed.
         """
         
         # Get information from Bootstrapping object
@@ -234,6 +239,17 @@ class DrawTrajectory():
         # Computing the depth component
         z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c
 
+        # Setting the directories for saving if desired
+        self.save = save
+        if self.save:
+            plot_dir_general = Path.cwd().joinpath("vo_plots")
+            if not plot_dir_general.is_dir():
+                plot_dir_general.mkdir()
+            dataset_str = b.data_loader.dataset_str
+            self.plot_dir_dataset = plot_dir_general.joinpath(dataset_str)
+            if not self.plot_dir_dataset.is_dir():
+                self.plot_dir_dataset.mkdir()
+
         # Plot settings
         plt.ion()
         self.fig, axs = plt.subplot_mosaic(
@@ -252,6 +268,7 @@ class DrawTrajectory():
                                             alpha=0.5, cmap=c_map, c=z_c, s=2)
         self.cbar = self.fig.colorbar(self.u_keypoints, orientation="vertical")
         self.cbar.set_label("Distance from camera, SFM units")
+        self.u.set_title("Current image with landmarks")
 
 
         # Right: xz landmark graphic
@@ -261,16 +278,23 @@ class DrawTrajectory():
                                       linestyle=None)[0]
         self.r_pos = self.r.plot(w_t_wc[0], w_t_wc[2], c="b", marker="X", 
                                  markersize=10)[0]       
-        self.r.set_xlabel("$X_c$ - SFM units") 
-        self.r.set_ylabel("$Z_c$ - SFM units")
+        self.r.set_xlabel("$X_w$ - SFM units") 
+        self.r.set_ylabel("$Z_w$ - SFM units")
         self.r.grid(visible=True, axis="both")
+        self.r.set_title("Landmarks $P$ in world frame")
 
         # Left: xz camera position
         self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_z, marker="o")[0]
         self.l.grid(visible=True, axis="both")
+        self.l.set_xlabel("Camera poses in world frame")
+        self.l.set_xlabel("$X_w$ - SFM units")
+        self.l.set_ylabel("$Z_w$ - SFM units")
         
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+        if self.save:
+            self.fig.savefig(self.plot_dir_dataset.joinpath(f"{self.frame:0{4}}.jpg"))
+        else:
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
 
     def update_data(self, t: np.array, p: np.array, x: np.array,
                      im: np.array):
@@ -352,5 +376,8 @@ class DrawTrajectory():
 
         self.frame += 1
         self.fig.suptitle(f"Image i = {self.frame}")
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+        if self.save:
+            self.fig.savefig(self.plot_dir_dataset.joinpath(f"{self.frame:0{4}}.jpg"))
+        else:
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()

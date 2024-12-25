@@ -12,10 +12,10 @@ dl = DataLoader("kitti")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
 # b.draw_all()
-dt = DrawTrajectory(b)
+dt = DrawTrajectory(b, save=True)
 print(b.transformation_matrix)
 
-for image in dl[5:]:
+for image in dl[5:10]:
     # debug=[VO.Debug.KLT]
     p_new, pi, xi = vo.process_frame(image, debug=[])
     dt.update_data(p_new, pi, xi, image)
