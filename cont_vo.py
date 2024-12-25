@@ -50,7 +50,8 @@ class VO:
         self.Fi_1 = self.Ci_1.copy()
 
         self.Ti_1 = np.tile(self.T_Ci_1__w.reshape(-1), (len(self.Ci_1), 1))
-        self.ids = [self.dl.init_frames[-1]] * len(self.Ci_1)
+        self.debug_ids = [self.dl.init_frames[-1]] * len(self.Ci_1)
+        self.debug_counter = self.dl.init_frames[-1]
         
         self.max_keypoints = max_keypoints
 
@@ -62,7 +63,7 @@ class VO:
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
 
-        self.sift = cv2.SIFT_create(nfeatures=100)
+        self.sift = cv2.SIFT_create()
         self.sift_keypoint_similarity_threshold = 10
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
@@ -149,6 +150,9 @@ class VO:
 
         # Step 4: Calculate angles between each tracked C_i
         # TODO: Can we do this without a for loop?
+        if debug and self.Debug.TRIANGULATION in debug:
+            self.debug_counter += 1
+
         for point_index in np.where(C_i_tracked)[0]: # loop through all tracked candidate points
             candidate_i = C_i[point_index]
             candidate_f = self.Fi_1[point_index]
@@ -171,7 +175,7 @@ class VO:
                                                             )
             
             angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
-
+ 
             """
             # Here is some code that does the same as above but using triangulation for the algorithm
             # You can use it to verify if the above works
@@ -194,10 +198,34 @@ class VO:
                     np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_f.reshape(-1)) / 
                     (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
             )
+
+            """
+            This solution triangulates the points directly in the world frame
+            """
+
+            projection_f = self.K @ transformation_fw.reshape(3,4)
+            projection_Ci = self.K @ self.T_Ci_1__w
+
+            triangulated_point_w = cv2.triangulatePoints(projection_f, projection_Ci, candidate_f, candidate_i)
+            triangulated_point_w /= triangulated_point_w[3]
+            triangulated_point_w = triangulated_point_w[:3]
+
+            transformation_wf = inverse_transformation(transformation_fw.reshape(3,4))
+            f_in_w = transformation_wf[:,:3] @ vector_to_candidate_f + transformation_wf[:,3][:,None]
+            c_in_w = R_w_Ci @ vector_to_candidate_i + w_t_w_Ci
+
+            triangulated_point_w_to_f = f_in_w - triangulated_point_w
+            triangulated_point_w_to_ci = c_in_w - triangulated_point_w
+
+            angle_between_points_with_triangulation_in_world = np.arccos(
+                    np.dot(triangulated_point_w_to_f.reshape(-1), triangulated_point_w_to_ci.reshape(-1)) / 
+                    (np.linalg.norm(triangulated_point_w_to_f) * np.linalg.norm(triangulated_point_w_to_ci))
+            )
             
             if debug and self.Debug.TRIANGULATION in debug and point_index ==  np.where(C_i_tracked)[0][0]:
-                print(angle_between_points)
-                print(angle_between_points_with_triangulation)
+                print("Triangle method: ", angle_between_points)
+                print("Triangulation method: ", angle_between_points_with_triangulation)
+                print("Triangulation method in world frame: ", angle_between_points_with_triangulation_in_world)
 
                 fig = plt.figure(figsize=(14, 5))
                 gs = fig.add_gridspec(2, 2)
@@ -208,7 +236,7 @@ class VO:
                 # Plot image and KLT results for candidate keypoint tracking
                 ax1.imshow(self.img_i_1, cmap="grey")
                 ax2.imshow(img_i, cmap="grey")
-                ax3.imshow(self.dl[self.ids[point_index]], cmap="grey")
+                ax3.imshow(self.dl[self.debug_ids[point_index]], cmap="grey")
 
                 a, b = candidate_i.ravel()
                 c, d = self.Ci_1[point_index].ravel()
@@ -244,10 +272,10 @@ class VO:
                 plt.show()
 
         # Step 5: Add candidates that match thresholds to sets
-            if angle_between_points_with_triangulation >= self.angle_threshold:
+            if angle_between_points_with_triangulation_in_world >= self.angle_threshold:
                 # TODO: Don't use append
                 self.Pi_1 = np.append(self.Pi_1, candidate_i[None,:], axis=0)
-                self.Xi_1 = np.append(self.Xi_1, (R_w_Ci @ triangulated_point + w_t_w_Ci).T, axis=0)
+                self.Xi_1 = np.append(self.Xi_1, triangulated_point_w.reshape(1,-1), axis=0)
                 C_i_tracked[point_index] = False # remove this point from tracking
 
         # Step 7: Update state vectors
@@ -258,7 +286,7 @@ class VO:
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
-        if True or len(self.Ci_1) <= self.max_keypoints:
+        if len(self.Ci_1) <= self.max_keypoints:
             new_candidates = self.sift.detect(img_i, None)
 
             candidates_to_add = []
@@ -275,7 +303,7 @@ class VO:
             self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
             self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
             if self.Debug.TRIANGULATION:
-                self.ids.extend([self.ids[-1]] * len (poses_to_add))
+                self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
 
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
