@@ -153,138 +153,73 @@ class VO:
         if debug and self.Debug.TRIANGULATION in debug:
             self.debug_counter += 1
 
-        for point_index in np.where(C_i_tracked)[0]: # loop through all tracked candidate points
-            candidate_i = C_i[point_index]
-            candidate_f = self.Fi_1[point_index]
-            transformation_fw = self.Ti_1[point_index]
+        # get the points
+        point_indices = np.where(C_i_tracked)[0]
 
-            T_if = multiply_transformation(self.T_Ci_1__w, inverse_transformation(transformation_fw.reshape(3,4)))
-            R_cf = T_if.reshape(3,4)[:,:3]
-            c_t_cf = T_if.reshape(3,4)[:,3][:,None] # column vector
+        candidate_is = C_i[point_indices]
+        candidate_fs = self.Fi_1[point_indices]
 
-            vector_to_candidate_i = np.linalg.inv(self.K) @ np.append(candidate_i, 1)[:, None]
-            angle_between_baseline_and_point_i = np.arccos(
-                                                            np.dot(c_t_cf.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
-                                                            (np.linalg.norm(c_t_cf) * np.linalg.norm(vector_to_candidate_i))
-                                                            )
-            vector_to_candidate_f = np.linalg.inv(self.K) @ np.append(candidate_f, 1)[:, None]
-            f_t_fc = - R_cf.T @ c_t_cf # Take inverse of R_cf using the transpose since orthonormal
-            angle_between_baseline_and_point_f = np.arccos(
-                                                            np.dot(f_t_fc.reshape(-1), vector_to_candidate_f.reshape(-1)) / 
-                                                            (np.linalg.norm(f_t_fc) * np.linalg.norm(vector_to_candidate_f))
-                                                            )
-            
-            angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
- 
-            """
-            # Here is some code that does the same as above but using triangulation for the algorithm
-            # You can use it to verify if the above works
-            """
+        # to homogeneous to apply K
+        candidate_is_homogeneous = np.hstack([candidate_is, np.ones((candidate_is.shape[0], 1))])  # (n, 3)
+        candidate_fs_homogeneous = np.hstack([candidate_fs, np.ones((candidate_fs.shape[0], 1))])  # (n, 3)   
+        
+        # apply k to get directions
+        inv_K = np.linalg.inv(self.K)
+        vectors_to_candidate_is = candidate_is_homogeneous @ inv_K.T
+        vectors_to_candidate_fs = candidate_fs_homogeneous @ inv_K.T
 
-            projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
-            projectionMat2 = self.K @ np.column_stack((R_cf, c_t_cf))
+        # rotation matrix for each f point
+        transformation_fw = self.Ti_1[point_indices]
+        transformation_fw = transformation_fw[:, :12].reshape(-1, 3, 4)
+        transformation_fw_r_tracked = transformation_fw[:, :, :3]  # (M, 3, 3)
+        transformation_fw_r_tracked = transformation_fw_r_tracked.transpose(0, 2, 1)  # (M, 3, 3)
 
-            triangulated_point = cv2.triangulatePoints(projectionMat1, projectionMat2, candidate_f, candidate_i)
-            triangulated_point /= triangulated_point[3]
-            triangulated_point = triangulated_point[:3]
+        T_Ci_1__w_r = self.T_Ci_1__w[:, :3]  # (3, 3)
+        R_cfs = np.einsum('ij,mjk->mik', T_Ci_1__w_r, transformation_fw_r_tracked)  # (M, 3, 3)
 
-            triangulated_point_in_i = R_cf @ triangulated_point + c_t_cf
-            f_in_i = R_cf @ vector_to_candidate_f + c_t_cf
-            
-            triangulated_point_to_f = f_in_i - triangulated_point_in_i
-            triangulated_point_to_ci = vector_to_candidate_i - triangulated_point_in_i
+        # normalized directions
+        dirs_i = vectors_to_candidate_is / np.linalg.norm(vectors_to_candidate_is, axis=1, keepdims=True)  # (M, 3)
+        dirs_f = vectors_to_candidate_fs / np.linalg.norm(vectors_to_candidate_fs, axis=1, keepdims=True)  # (M, 3)
 
-            angle_between_points_with_triangulation = np.arccos(
-                    np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_f.reshape(-1)) / 
-                    (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
-            )
+        # rotate each dir_f by the rotation matrix
+        dirs_f = np.einsum('nij,nj->ni', R_cfs, dirs_f) # (M, 3)
 
-            """
-            This solution triangulates the points directly in the world frame
-            """
+        # calculate the angle between each dir_i and dir_f
+        angles_between_points = np.arccos(np.einsum('ij,ij->i', dirs_i, dirs_f))  # (M,)
 
-            projection_f = self.K @ transformation_fw.reshape(3,4)
-            projection_Ci = self.K @ self.T_Ci_1__w
+        # get corresponding triangulations only of the matching ones
+        angle_mask = angles_between_points >= self.angle_threshold 
+        masked_candidate_is = candidate_is[angle_mask]  # (M', 3)
+        masked_candidate_fs = candidate_fs[angle_mask]  # (M', 3)  
+        masked_transformation_fw = transformation_fw[angle_mask]
 
+        # Get projection matrices for triangulation
+        masked_projection_fs = np.einsum('ij,kjl->kil', self.K, masked_transformation_fw)  # (M, 3, 3)
+        projection_Ci = self.K @ self.T_Ci_1__w
+
+        # zero list for the points
+        triangulate_points_w = np.empty((len(masked_candidate_is), 3))  # (M', 4)
+
+        # nooooo, a for loop
+        for i in range(len(masked_candidate_is)):
+            projection_f = masked_projection_fs[i]  # (3, 3)
+            candidate_i = masked_candidate_is[i]  # (3,) 
+            candidate_f = masked_candidate_fs[i]  # (3,) 
             triangulated_point_w = cv2.triangulatePoints(projection_f, projection_Ci, candidate_f, candidate_i)
             triangulated_point_w /= triangulated_point_w[3]
             triangulated_point_w = triangulated_point_w[:3]
+            triangulate_points_w[i] = triangulated_point_w.reshape(-1)
 
-            transformation_wf = inverse_transformation(transformation_fw.reshape(3,4))
-            f_in_w = transformation_wf[:,:3] @ vector_to_candidate_f + transformation_wf[:,3][:,None]
-            c_in_w = R_w_Ci @ vector_to_candidate_i + w_t_w_Ci
-
-            triangulated_point_w_to_f = f_in_w - triangulated_point_w
-            triangulated_point_w_to_ci = c_in_w - triangulated_point_w
-
-            angle_between_points_with_triangulation_in_world = np.arccos(
-                    np.dot(triangulated_point_w_to_f.reshape(-1), triangulated_point_w_to_ci.reshape(-1)) / 
-                    (np.linalg.norm(triangulated_point_w_to_f) * np.linalg.norm(triangulated_point_w_to_ci))
-            )
-
-            """
-            Here is some code that **should** do the same as above, just with less numerical error? idk but the result is close to the the triangulation method.
-            """
-            dir_i = vector_to_candidate_i / np.linalg.norm(vector_to_candidate_i) # Normalize
-            dir_f = vector_to_candidate_f / np.linalg.norm(vector_to_candidate_f)
-            dir_f = R_cf @ dir_f # Rotate to correct camera frame
-            angle_between_points_luca = np.arccos(np.dot(dir_i.reshape(-1), dir_f.reshape(-1))) # Angle between the two directions
-            
-            if debug and self.Debug.TRIANGULATION in debug and point_index ==  np.where(C_i_tracked)[0][0]:
-                print("Triangle method: ", angle_between_points)
-                print("Triangulation method: ", angle_between_points_with_triangulation)
-                print("Triangulation method in world frame: ", angle_between_points_with_triangulation_in_world)
-                print("Direction method: ", angle_between_points_luca)
-                fig = plt.figure(figsize=(14, 5))
-                gs = fig.add_gridspec(2, 2)
-                ax1 = fig.add_subplot(gs[0, 0])
-                ax2 = fig.add_subplot(gs[0, 1])
-                ax3 = fig.add_subplot(gs[1, 0])
-
-                # Plot image and KLT results for candidate keypoint tracking
-                ax1.imshow(self.img_i_1, cmap="grey")
-                ax2.imshow(img_i, cmap="grey")
-                ax3.imshow(self.dl[self.debug_ids[point_index]], cmap="grey")
-
-                a, b = candidate_i.ravel()
-                c, d = self.Ci_1[point_index].ravel()
-                e, f = candidate_f.ravel()
-                ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
-                ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
-                ax3.plot((a, c), (b, d), '-', linewidth=2, c="pink")
-
-                ax1.scatter(c, d, s=5, c="green", alpha=0.5)
-                ax2.scatter(a, b, s=5, c="red", alpha=0.5)
-                ax3.scatter(e, f, s=5, c="green", alpha=0.5)
-                ax1.set_title(f"C_i in Old Image")
-                ax2.set_title(f"C_i in New Image")
-                ax3.set_title(F"C_i in Original Image")
-
-                # Plot triangulation results
-                ax4 = fig.add_subplot(gs[1, 1], projection='3d')
-                ax4.view_init(elev=-90, azim=0, roll=-90)
-                ax4.set_box_aspect((20, 10, 15)) # aspect_x, aspect_y, aspect_z
-                ax4.set_xlabel("X")
-                ax4.set_ylabel("Y")
-                ax4.set_zlabel("Z")
-                points_to_plot = [
-                    (triangulated_point_in_i, "red"),
-                    (np.array([0,0,0]), "black"), # camera i center
-                    (c_t_cf, "cyan"), # camera f center
-                    (f_in_i, "green"),
-                    (vector_to_candidate_i, "magenta"),
-                ]
-                for point, colour in points_to_plot:
-                    ax4.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
-
-                plt.show()
 
         # Step 5: Add candidates that match thresholds to sets
-            if angle_between_points_luca >= self.angle_threshold:
-                # TODO: Don't use append
-                self.Pi_1 = np.append(self.Pi_1, candidate_i[None,:], axis=0)
-                self.Xi_1 = np.append(self.Xi_1, triangulated_point_w.reshape(1,-1), axis=0)
-                C_i_tracked[point_index] = False # remove this point from tracking
+        self.Pi_1 = np.vstack([self.Pi_1, masked_candidate_is])  # Stack candidates that match threshold
+        self.Xi_1 = np.vstack([self.Xi_1, triangulate_points_w])  # Stack triangulated points
+
+        # back to unfiltered array to remove added points from tracking
+        filtered_indices = np.where(C_i_tracked)[0]  # Get indices of tracked candidate points
+        new_filter_unfiltered = np.zeros_like(C_i_tracked, dtype=bool)
+        new_filter_unfiltered[filtered_indices] = angle_mask
+        C_i_tracked[new_filter_unfiltered] = False  # Update filtered array with new mask
 
         # Step 7: Update state vectors
         self.Ci_1 = C_i[C_i_tracked]
