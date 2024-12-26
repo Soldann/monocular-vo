@@ -158,7 +158,7 @@ class Bootstrap():
         self.init_frames = init_frames
         self.K = data_loader.K
         self.outlier_tolerance = outlier_tolerance
-        self.init_frames = data_loader.init_frames
+        self.init_frames = data_loader.init_frames if init_frames is None else init_frames
         
         # Filled in by get_points()
         self.E = None
