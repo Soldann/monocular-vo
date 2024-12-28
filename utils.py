@@ -7,6 +7,73 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
+import cv2
+
+linear_LS_triangulation_C = -np.eye(2, 3)
+def linear_LS_triangulation(u1, P1, u2, P2):
+    """
+    Linear Least Squares based triangulation.
+    Relative speed: 0.1
+    
+    (u1, P1) is the reference pair containing normalized image coordinates (x, y) and the corresponding camera matrix.
+    (u2, P2) is the second pair.
+    
+    u1 and u2 are matrices: amount of points equals #rows and should be equal for u1 and u2.
+    
+    The status-vector will be True for all points.
+    """
+    A = np.zeros((4, 3))
+    b = np.zeros((4, 1))
+    
+    # Create array of triangulated points
+    x = np.zeros((3, len(u1)))
+    
+    # Initialize C matrices
+    C1 = np.array(linear_LS_triangulation_C)
+    C2 = np.array(linear_LS_triangulation_C)
+    
+    for i in range(len(u1)):
+        # Derivation of matrices A and b:
+        # for each camera following equations hold in case of perfect point matches:
+        #     u.x * (P[2,:] * x)     =     P[0,:] * x
+        #     u.y * (P[2,:] * x)     =     P[1,:] * x
+        # and imposing the constraint:
+        #     x = [x.x, x.y, x.z, 1]^T
+        # yields:
+        #     (u.x * P[2, 0:3] - P[0, 0:3]) * [x.x, x.y, x.z]^T     +     (u.x * P[2, 3] - P[0, 3]) * 1     =     0
+        #     (u.y * P[2, 0:3] - P[1, 0:3]) * [x.x, x.y, x.z]^T     +     (u.y * P[2, 3] - P[1, 3]) * 1     =     0
+        # and since we have to do this for 2 cameras, and since we imposed the constraint,
+        # we have to solve 4 equations in 3 unknowns (in LS sense).
+
+        # Build C matrices, to construct A and b in a concise way
+        C1[:, 2] = u1[i, :]
+        C2[:, 2] = u2[i, :]
+        
+        # Build A matrix:
+        # [
+        #     [ u1.x * P1[2,0] - P1[0,0],    u1.x * P1[2,1] - P1[0,1],    u1.x * P1[2,2] - P1[0,2] ],
+        #     [ u1.y * P1[2,0] - P1[1,0],    u1.y * P1[2,1] - P1[1,1],    u1.y * P1[2,2] - P1[1,2] ],
+        #     [ u2.x * P2[2,0] - P2[0,0],    u2.x * P2[2,1] - P2[0,1],    u2.x * P2[2,2] - P2[0,2] ],
+        #     [ u2.y * P2[2,0] - P2[1,0],    u2.y * P2[2,1] - P2[1,1],    u2.y * P2[2,2] - P2[1,2] ]
+        # ]
+        A[0:2, :] = C1.dot(P1[0:3, 0:3])    # C1 * R1
+        A[2:4, :] = C2.dot(P2[0:3, 0:3])    # C2 * R2
+        
+        # Build b vector:
+        # [
+        #     [ -(u1.x * P1[2,3] - P1[0,3]) ],
+        #     [ -(u1.y * P1[2,3] - P1[1,3]) ],
+        #     [ -(u2.x * P2[2,3] - P2[0,3]) ],
+        #     [ -(u2.y * P2[2,3] - P2[1,3]) ]
+        # ]
+        b[0:2, :] = C1.dot(P1[0:3, 3:4])    # C1 * t1
+        b[2:4, :] = C2.dot(P2[0:3, 3:4])    # C2 * t2
+        b *= -1
+        
+        # Solve for x vector
+        cv2.solve(A, b, x[:, i:i+1], cv2.DECOMP_SVD)
+    
+    return x.T.astype(float), np.ones(len(u1), dtype=bool)
 
 
 def check_inside_FOV(alpha, w, h, p):

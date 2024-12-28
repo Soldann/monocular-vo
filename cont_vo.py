@@ -64,8 +64,10 @@ class VO:
         
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
+        self.angle_threshold = 0.04
 
-        self.sift = cv2.SIFT_create()
+        self.sift = cv2.SIFT_create(sigma=2, nOctaveLayers=3, edgeThreshold=10, nfeatures=50)
+
         self.sift_keypoint_similarity_threshold = 10
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
@@ -139,9 +141,9 @@ class VO:
 
         # Step 2: Run PnP to get pose for the new frame
         
-        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP, reprojectionError=3, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
-        if ransac_inliers is None or len(ransac_inliers) < 10:
-            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        if ransac_inliers is None or len(ransac_inliers) < 15:
+            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=16, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
 
         ransac_inliers = ransac_inliers.flatten()
         self.Pi_1 = self.Pi_1[ransac_inliers] # Update Pi with ransac
@@ -209,21 +211,24 @@ class VO:
         projection_Ci = self.K @ self.T_Ci_1__w
         
         # zero list for the points
-        triangulate_points_w = np.empty((len(masked_candidate_is), 3))  # (M', 4)
+        triangulate_points_w = np.zeros((len(masked_candidate_is), 3))  # (M', 4)
 
         # nooooo, a for loop
         for i in range(len(masked_candidate_is)):
             projection_f = masked_projection_fs[i]  # (3, 3)
             candidate_i = masked_candidate_is[i]  # (3,) 
             candidate_f = masked_candidate_fs[i]  # (3,)
-            triangulated_point_w = cv2.triangulatePoints(projection_f, projection_Ci, candidate_f, candidate_i)
-            triangulated_point_w /= triangulated_point_w[3]  # Normalize
-
-            p_in_camera = self.T_Ci_1__w @ triangulated_point_w
+            a, _ = linear_LS_triangulation(candidate_f.reshape(1,2), projection_f, candidate_i.reshape(1,2), projection_Ci)
+            triangulated_point_w = np.append(a, 1)  # add a 1 to the end of the vector
+            triangulate_points_w[i] = triangulated_point_w[:3]
+            basis_change_matrix = np.vstack([self.T_Ci_1__w, np.array([0, 0, 0, 1])])
+            p_in_camera = basis_change_matrix @ triangulated_point_w
+            p_in_camera = p_in_camera[:3] / p_in_camera[3]  # Normalize the point
 
             if p_in_camera[2] < 0:
                 triangulated_point_w = triangulated_point_w * -1
                 print("behind???")
+
             triangulated_point_w = triangulated_point_w[:3]
             triangulate_points_w[i] = triangulated_point_w.reshape(-1)
 
@@ -232,6 +237,7 @@ class VO:
         self.Pi_1 = np.vstack([self.Pi_1, masked_candidate_is])  # Stack candidates that match threshold
         self.Xi_1 = np.vstack([self.Xi_1, triangulate_points_w])  # Stack triangulated points
 
+        print(len(masked_candidate_is))
         # back to unfiltered array to remove added points from tracking
         filtered_indices = np.where(C_i_tracked)[0]  # Get indices of tracked candidate points
         new_filter_unfiltered = np.zeros_like(C_i_tracked, dtype=bool)
@@ -250,11 +256,15 @@ class VO:
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
-        if (len(self.Ci_1) <= self.max_keypoints or self.frames_since_last_sift > 5) and True:
+        if (len(self.Ci_1) <= self.max_keypoints or self.frames_since_last_sift > 0) and True:
 
             self.frames_since_last_sift = 0
-            new_candidates = self.sift.detect(img_i, None)
+            feature_add_count = int(max(len(self.Pi_1)*1.3, len(self.Pi_1) + 100))
 
+            self.sift = cv2.SIFT_create(sigma=2.5, nOctaveLayers=3, edgeThreshold=10, nfeatures=feature_add_count)
+
+            new_candidates = self.sift.detect(img_i, None)
+            new_candidates = [kp for kp in new_candidates if kp.response > 0.001]
             candidates_to_add = []
             poses_to_add = []
             for new_point in new_candidates:
@@ -266,9 +276,10 @@ class VO:
             if debug and self.Debug.SIFT in debug:
                 print(len(candidates_to_add))
 
-            self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
-            self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
-            self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
+            if len(candidates_to_add) > 0:
+                self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
+                self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
+                self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
             if self.Debug.TRIANGULATION:
                 self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
 
