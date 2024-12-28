@@ -8,18 +8,24 @@ from initialise_vo import Bootstrap, DataLoader
 from utils import DrawTrajectory
 
 
-dl = DataLoader("kitti")
-b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+dl = DataLoader("own_2")
+b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(240, 250))
+#b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+
 vo = VO(b)
-# b.draw_all()
-dt = DrawTrajectory(b, save=True)
+b.draw_all()
+dt = DrawTrajectory(b, save=False)
 print(b.transformation_matrix)
 
-for image in dl[5:10]:
+index = 0
+for image in dl[250:500]:
     # debug=[VO.Debug.KLT]
+    index += 1
+    print("Frame", index)
     p_new, pi, xi = vo.process_frame(image, debug=[])
     dt.update_data(p_new, pi, xi, image)
     print(p_new)
+
 # vo.next_image()
 # vo.track_keypoints()
 # vo.draw_keypoint_tracking()

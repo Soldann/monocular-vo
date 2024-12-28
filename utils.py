@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 
+
 def check_inside_FOV(alpha, w, h, p):
     """
     Removes the landmarks that are outside the camers's field of view
@@ -62,11 +63,9 @@ def is_new_keypoint(cv2keypoint, existing_keypoints: np.array, threshold):
     - bool
         - True for inliers and False for outliers
     """
-    for point in existing_keypoints:
-        distance = np.linalg.norm(cv2keypoint.pt - point)
-        if distance < threshold:
-            return False
-    return True
+    distances = np.linalg.norm(existing_keypoints - cv2keypoint.pt, axis=1)
+    return not np.any(distances < threshold)
+
 
 def median_outliers(p: np.array, x_tol=None, y_tol=None, z_tol=15) -> np.array:
     """
@@ -130,9 +129,10 @@ def multiply_transformation(transform_ab, transform_bc):
     -  np.array shape (3 x 4)
         - A standard transformation matrix T_ac, converting a point from frame c to frame a
     """
-    R_ac = transform_ab[:,:3] @ transform_bc[:,:3]
-    t_ac = transform_ab[:,:3] @ transform_bc[:,3] + transform_ab[:,3]
+    R_ac = transform_ab[:, :3] @ transform_bc[:, :3]
+    t_ac = transform_ab[:, :3] @ transform_bc[:, 3] + transform_ab[:, 3]
     return np.column_stack((R_ac, t_ac))
+
 
 def inverse_transformation(transformation):
     """
@@ -145,13 +145,13 @@ def inverse_transformation(transformation):
     -  np.array shape (3 x 4)
         - A standard transformation matrix , converting a point from frame b to frame a
     """
-    R_ba = transformation[:,:3]
+    R_ba = transformation[:, :3]
     b_t_ba = transformation[:, 3]
 
     R_ab = R_ba.T
     a_t_ab = - R_ab @ b_t_ba
     return np.column_stack((R_ab, a_t_ab))
-    
+
 
 def triangulate_points(k, r, t, p1, p2):
     """
@@ -175,7 +175,7 @@ def triangulate_points(k, r, t, p1, p2):
     big_p = np.zeros((n_points, 3))
 
     for i in range(n_points):
-        
+
         # cross product p1
         p_1 = p1[i]
         cr_p1 = np.array([[0, -1, p_1[1]],
@@ -186,7 +186,7 @@ def triangulate_points(k, r, t, p1, p2):
         cr_p2 = np.array([[0, -1, p_2[1]],
                           [1, 0, -p_2[0]],
                           [-p_2[1], p_2[0], 0]])
-        
+
         # Matrix for triangulation:
         triang = np.vstack((cr_p1 @ m1, cr_p2 @ m2))
 
@@ -198,6 +198,17 @@ def triangulate_points(k, r, t, p1, p2):
         big_p[i] = big_p3
 
     return big_p
+
+
+def rotation_matrix_to_euler_angles(R):
+    # Ensure the matrix is valid (orthogonal and determinant of 1)
+    # Yaw (ψ), Pitch (θ), Roll (φ) calculations
+    pitch = np.arctan2(-R[2, 0], np.sqrt(R[0, 0]**2 + R[1, 0]**2))
+    roll = np.arctan2(R[2, 1], R[2, 2])
+    yaw = np.arctan2(R[1, 0], R[0, 0])
+
+    # Return as degrees
+    return np.degrees(pitch), np.degrees(roll), np.degrees(yaw)
 
 
 class DrawTrajectory():
@@ -220,7 +231,7 @@ class DrawTrajectory():
             for later in-depth inspection. When save is true, the plots are
             not displayed.
         """
-        
+
         # Get information from Bootstrapping object
         p = b.keypoints
         x = b.triangulated_points
@@ -234,6 +245,7 @@ class DrawTrajectory():
         c_t_cw = b.transformation_matrix[:, -1]
         w_t_wc = -1 * c_R_cw.T @ c_t_cw
         self.w_t_wc_x = [w_t_wc[0]]
+        self.w_t_wc_y = [w_t_wc[1]]
         self.w_t_wc_z = [w_t_wc[2]]
 
         # Computing the depth component
@@ -253,43 +265,58 @@ class DrawTrajectory():
         # Plot settings
         plt.ion()
         self.fig, axs = plt.subplot_mosaic(
-            [["u", "u"], ["l", "r"]], 
+            [["u", "u", "u"], ["m", "l", "r"]],
             figsize=(10, 8),                     # (width x height)
             layout="constrained"
-                                           )
+        )
         self.u = axs["u"]
+        #self.l = self.fig.add_subplot(2, 3, 5)
         self.l = axs["l"]
         self.r = axs["r"]
+        self.m = axs["m"]
         self.fig.suptitle(f"Image i = {self.frame}")
 
         # Upper plot:
         self.u_im = self.u.imshow(im, cmap="grey")
-        self.u_keypoints = self.u.scatter(p[:, 0], p[:, 1], marker="o", 
-                                            alpha=0.5, cmap=c_map, c=z_c, s=2)
+        self.u_keypoints = self.u.scatter(p[:, 0], p[:, 1], marker="o",
+                                          alpha=0.5, cmap=c_map, c=z_c, s=2)
         self.cbar = self.fig.colorbar(self.u_keypoints, orientation="vertical")
         self.cbar.set_label("Distance from camera, SFM units")
         self.u.set_title("Current image with landmarks")
 
-
         # Right: xz landmark graphic
-        self.r_landmarks = self.r.scatter(x[:, 0], x[:, 2], marker="o", 
-                                            alpha=0.5, cmap=c_map, c=z_c)
+        self.r_landmarks = self.r.scatter(x[:, 0], x[:, 2], marker="o",
+                                          alpha=0.5, cmap=c_map, c=z_c)
         self.r_prev_pos = self.r.plot(0, 0, marker="x", c="b", markersize=5,
                                       linestyle=None)[0]
-        self.r_pos = self.r.plot(w_t_wc[0], w_t_wc[2], c="b", marker="X", 
-                                 markersize=10)[0]       
-        self.r.set_xlabel("$X_w$ - SFM units") 
+        self.r_pos = self.r.plot(w_t_wc[0], w_t_wc[2], c="b", marker="X",
+                                 markersize=10)[0]
+        self.r.set_xlabel("$X_w$ - SFM units")
         self.r.set_ylabel("$Z_w$ - SFM units")
+        self.r.set_ylim(-200, 200)
+        self.r.autoscale(False)
         self.r.grid(visible=True, axis="both")
         self.r.set_title("Landmarks $P$ in world frame")
 
         # Left: xz camera position
-        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_z, marker="o")[0]
-        self.l.grid(visible=True, axis="both")
+        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_z, color='blue', linewidth=2)[0]
+        self.l.grid(visible=True)
         self.l.set_xlabel("Camera poses in world frame")
         self.l.set_xlabel("$X_w$ - SFM units")
         self.l.set_ylabel("$Z_w$ - SFM units")
-        
+
+
+        # camera rotation
+        pitch, roll, yaw = rotation_matrix_to_euler_angles(c_R_cw)
+        angles = [roll, yaw, pitch]
+        labels = ['Pitch', 'Roll', 'Yaw']
+        colors = ['r', 'g', 'b']
+        self.m_pos = self.m.bar(labels, angles, color=colors)
+        self.m.set_title("Pitch, Roll, and Yaw Angles")
+        self.m.set_ylabel("Angle (degrees)")
+        self.m.set_ylim([-180, 180])
+        self.m.grid(True)
+
         if self.save:
             self.fig.savefig(self.plot_dir_dataset.joinpath(f"{self.frame:0{4}}.jpg"))
         else:
@@ -297,7 +324,7 @@ class DrawTrajectory():
             self.fig.canvas.flush_events()
 
     def update_data(self, t: np.array, p: np.array, x: np.array,
-                     im: np.array):
+                    im: np.array):
         """
         Update the plot
 
@@ -324,6 +351,7 @@ class DrawTrajectory():
         w_t_wc = -1 * c_R_cw.T @ c_t_cw
         self.w_t_wc_x.append(w_t_wc[0])
         self.w_t_wc_z.append(w_t_wc[2])
+        self.w_t_wc_y.append(w_t_wc[1])
 
         # Computing the depth component
         z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c
@@ -341,9 +369,16 @@ class DrawTrajectory():
         self.r_landmarks.set_offsets(np.c_[x[:, 0], x[:, 2]])
         self.r_landmarks.set_array(z_c)  # Upadte the colour mapping
         self.r_prev_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
-        
+
         # Left plot
         self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
+        #self.l_pos.set_3d_properties(self.w_t_wc_z)
+
+        # rotation plot
+        r, p, y = rotation_matrix_to_euler_angles(c_R_cw)
+        self.m_pos[0].set_height(r)  # Update the plot data with new values
+        self.m_pos[1].set_height(p)
+        self.m_pos[2].set_height(y)
 
         ### ------- UPDATE FIGURE SCALE ------- ###
 

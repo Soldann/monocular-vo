@@ -118,10 +118,56 @@ class DataLoader():
             # Initial frames for bootstrapping:
             self.init_frames = (0, 3)
 
+        elif dataset == "own_1":
+            base_path = Path.cwd().joinpath("own_dataset", "ds1")
+            
+            # Load camera parameters for Kitti
+            path_calib_data = base_path.joinpath("mtx_undistorted.txt")
+            K = np.loadtxt(path_calib_data, delimiter=',')
+            self.K = K
+
+            # The images have been undistorted
+            self.dist = None
+
+            # Path to the directory of the images; use image_0 by default
+            self.im_dir = base_path.joinpath("images", "undistorted")
+
+            # List of paths to all the images; use image_0 by default
+            self.all_im_paths = list(self.im_dir.glob("*"))
+
+            # Number of images in the dataset
+            self.n_im = len(self.all_im_paths)
+
+            # Initial frames for bootstrapping
+            self.init_frames = (0, 10)
+        
+        elif dataset == "own_2":
+            base_path = Path.cwd().joinpath("own_dataset", "ds2")
+            
+            # Load camera parameters for Kitti
+            path_calib_data = base_path.joinpath("mtx_undistorted.txt")
+            K = np.loadtxt(path_calib_data, delimiter=',')
+            self.K = K
+
+            # The images have been undistorted
+            self.dist = None
+
+            # Path to the directory of the images; use image_0 by default
+            self.im_dir = base_path.joinpath("images", "undistorted")
+
+            # List of paths to all the images; use image_0 by default
+            self.all_im_paths = list(self.im_dir.glob("*"))
+
+            # Number of images in the dataset
+            self.n_im = len(self.all_im_paths)
+
+            # Initial frames for bootstrapping
+            self.init_frames = (0, 10)
+
         else:  # The input is not in ("kitti", "parking", "malaga"):
             raise ValueError("Did not specify one of 'kitti', 'parking'"
                              +" or 'malaga'")
-
+        
 
     def __getitem__(self, index):
         if isinstance(index, slice):
@@ -155,11 +201,12 @@ class Bootstrap():
         
         self.data_loader = data_loader
         self.all_im_paths = data_loader.all_im_paths
-        self.init_frames = init_frames
         self.K = data_loader.K
         self.outlier_tolerance = outlier_tolerance
         self.init_frames = data_loader.init_frames
-        
+        if init_frames:
+            self.init_frames = init_frames
+
         # Filled in by get_points()
         self.E = None
         self.R = None

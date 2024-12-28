@@ -26,6 +26,8 @@ class VO:
               marks and the positions of the corresponding keypoints
         """
 
+        self.frames_since_last_sift = 0
+
         # Setting information from bootstrapping
         self.dl = bootstrap_obj.data_loader                              # data loader
         self.img_i_1 = self.dl[bootstrap_obj.init_frames[-1]]
@@ -57,7 +59,7 @@ class VO:
 
         # Parameters Lucas Kanade
         self.lk_params = dict( winSize  = (15, 15),
-                  maxLevel = 0,
+                  maxLevel = 3,
                   criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
         
         # angle threshold
@@ -124,27 +126,34 @@ class VO:
                 - The current keypoints in set P belonging to the landmarks
                 X. Shape (n x 2)
         """
-
+        self.frames_since_last_sift += 1
         # Step 1: run KLT  on the points P
         P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P", self.Debug.KLT in debug if debug else False)
         
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
 
+        print("P_i_tracked:", P_i_tracked.shape)
+        print("Pi_1:", self.Pi_1.shape)
+        print("Xi_1:", self.Xi_1.shape)
+
         # Step 2: Run PnP to get pose for the new frame
         
-        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP, reprojectionError=3, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        if ransac_inliers is None or len(ransac_inliers) < 10:
+            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_EPNP, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+
         ransac_inliers = ransac_inliers.flatten()
         self.Pi_1 = self.Pi_1[ransac_inliers] # Update Pi with ransac
         self.Xi_1 = self.Xi_1[ransac_inliers] # Update Xi with ransac
 
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
-        R_cw, _ = cv2.Rodrigues(r_cw) # rotation vector world to camera frame
+        R_cw, _ = cv2.Rodrigues(r_cw)# rotation vector world to camera frame
         self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))
         
         R_w_Ci = self.T_Ci_1__w[:3,:3].T # rotation vector from Ci to world is inverse or rotation vector world to Ci
         w_t_w_Ci = - R_w_Ci @ self.T_Ci_1__w[:3,3, None] # tranformation vector from Ci to world in world frame, vertical vector
-
+        
         # Step 3: Run KLT on candidate keypoints
         C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C", self.Debug.KLT in debug if debug else False)
 
@@ -188,7 +197,9 @@ class VO:
         angles_between_points = np.arccos(np.einsum('ij,ij->i', dirs_i, dirs_f))  # (M,)
 
         # get corresponding triangulations only of the matching ones
-        angle_mask = angles_between_points >= self.angle_threshold 
+        angle_mask = angles_between_points >= self.angle_threshold
+        print("Angle mask: ", str(angle_mask.sum()), "of", len(angle_mask))
+
         masked_candidate_is = candidate_is[angle_mask]  # (M', 3)
         masked_candidate_fs = candidate_fs[angle_mask]  # (M', 3)  
         masked_transformation_fw = transformation_fw[angle_mask]
@@ -196,7 +207,7 @@ class VO:
         # Get projection matrices for triangulation
         masked_projection_fs = np.einsum('ij,kjl->kil', self.K, masked_transformation_fw)  # (M, 3, 3)
         projection_Ci = self.K @ self.T_Ci_1__w
-
+        
         # zero list for the points
         triangulate_points_w = np.empty((len(masked_candidate_is), 3))  # (M', 4)
 
@@ -204,9 +215,15 @@ class VO:
         for i in range(len(masked_candidate_is)):
             projection_f = masked_projection_fs[i]  # (3, 3)
             candidate_i = masked_candidate_is[i]  # (3,) 
-            candidate_f = masked_candidate_fs[i]  # (3,) 
+            candidate_f = masked_candidate_fs[i]  # (3,)
             triangulated_point_w = cv2.triangulatePoints(projection_f, projection_Ci, candidate_f, candidate_i)
-            triangulated_point_w /= triangulated_point_w[3]
+            triangulated_point_w /= triangulated_point_w[3]  # Normalize
+
+            p_in_camera = self.T_Ci_1__w @ triangulated_point_w
+
+            if p_in_camera[2] < 0:
+                triangulated_point_w = triangulated_point_w * -1
+                print("behind???")
             triangulated_point_w = triangulated_point_w[:3]
             triangulate_points_w[i] = triangulated_point_w.reshape(-1)
 
@@ -222,6 +239,10 @@ class VO:
         C_i_tracked[new_filter_unfiltered] = False  # Update filtered array with new mask
 
         # Step 7: Update state vectors
+        # how many true values in C_i_tracked?
+        num_true = np.sum(C_i_tracked)
+        print(f"Number of true values in C_i_tracked: {num_true}")
+
         self.Ci_1 = C_i[C_i_tracked]
         self.Fi_1 = self.Fi_1[C_i_tracked]
         self.Ti_1 = self.Ti_1[C_i_tracked]
@@ -229,7 +250,9 @@ class VO:
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
-        if len(self.Ci_1) <= self.max_keypoints:
+        if (len(self.Ci_1) <= self.max_keypoints or self.frames_since_last_sift > 5) and True:
+
+            self.frames_since_last_sift = 0
             new_candidates = self.sift.detect(img_i, None)
 
             candidates_to_add = []
@@ -239,6 +262,7 @@ class VO:
                     candidates_to_add.append(new_point.pt)
                     poses_to_add.append(self.T_Ci_1__w.flatten())
 
+            print(f"Added keypoint count: {len(candidates_to_add)}")
             if debug and self.Debug.SIFT in debug:
                 print(len(candidates_to_add))
 
@@ -247,7 +271,6 @@ class VO:
             self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
             if self.Debug.TRIANGULATION:
                 self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
-
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
