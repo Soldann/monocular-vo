@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from enum import Enum
 from typing import List, Optional
 from utils import *
+import time
 
 class VO:
 
@@ -254,7 +255,7 @@ class VO:
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
-        w = img_i.shape[1]
+        h, w = img_i.shape
         total = len(self.Ci_1)
         left_of_screen = np.sum(self.Ci_1[:, 0] < w/3)
         right_of_screen = np.sum(self.Ci_1[:, 0] > w/3)
@@ -265,35 +266,71 @@ class VO:
 
             self.frames_since_last_sift = 0
             #feature_add_count = int(max(len(old_features)*2, 100))
-            feature_add_count = 500
+            feature_add_count = 250
             self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
 
-            mask = np.ones(img_i.shape, dtype=np.uint8) * 255  # Start with full mask
+            sift_img = img_i.copy()  # Copy the original image to work on it
+            
+            split_count_w = 4
+            split_count_h = 3
+            border_to_remove_w = w % split_count_w
+            border_to_remove_h = h % split_count_h
+
+            sift_w = w -border_to_remove_w
+            sift_h = h - border_to_remove_h
+            sift_img = sift_img[:sift_h, :sift_w]
+
+            mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
             for kp in old_features:
                 cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int(10 * w/1000), color=0, thickness=-1)
-            sift_img = img_i.copy()  # Copy the original image to work on it
+            
+            blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
+            mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
+            
+            new_candidates = []
 
-            sift_img[mask == 0] = 255
+            t = time.time()
 
-            if total <= self.max_keypoints:
-                new_candidates = self.sift.detect(sift_img, mask)
-            elif left_of_screen < total/3:
-                left_half = sift_img[:, :w // 3]  # Left half
-                left_mask = mask[:, :w // 3]
-                new_candidates = self.sift.detect(left_half, left_mask)
+            for idx in range(blocks.shape[0]):
+                block = blocks[idx]  # Get the current block
+                mask_block = mask_blocks[idx]  # Get the corresponding mask block
 
-            elif right_of_screen < total/3:
-                right_half = sift_img[:, w*2 // 3:]  # Right half
-                right_mask = mask[:, w*2 // 3:]
-                new_candidates = self.sift.detect(right_half, right_mask)
-                # add w//2 to every x coorndiate
-                for c in new_candidates:
-                    c.pt = (c.pt[0] + w*2 // 3, c.pt[1])
+                if right_of_screen < total/3.0 and idx % split_count_w < split_count_w*2 // 3:
+                    continue
+                if left_of_screen < total/3.0 and idx % split_count_w > split_count_w // 3:
+                    continue
+                
+                row = idx // split_count_w
+                col = idx % split_count_w
+                offset_x = col * (sift_w // split_count_w)
+                offset_y = row * (sift_h // split_count_h)
+                block_offset = np.array([offset_x, offset_y])
+                keypoints = self.sift.detect(block, mask_block)
+            
+                for keypoint in keypoints:
+                    keypoint.pt += block_offset
+                    new_candidates.append(keypoint)
+            
+            print(f"Time taken for {blocks.shape[0]} blocks: {time.time() - t} seconds")
+
+            # if total <= self.max_keypoints:
+            #     new_candidates = self.sift.detect(sift_img, mask)
+            # elif left_of_screen < total/3:
+            #     left_half = sift_img[:, :w // 3]  # Left half
+            #     left_mask = mask[:, :w // 3]
+            #     new_candidates = self.sift.detect(left_half, left_mask)
+
+            # elif right_of_screen < total/3:
+            #     right_half = sift_img[:, w*2 // 3:]  # Right half
+            #     right_mask = mask[:, w*2 // 3:]
+            #     new_candidates = self.sift.detect(right_half, right_mask)
+            #     # add w//2 to every x coorndiate
+            #     for c in new_candidates:
+            #         c.pt = (c.pt[0] + w*2 // 3, c.pt[1])
 
 
             #new_candidates = [kp for kp in new_candidates if kp.response > 0.0001]
             candidates_to_add = []
-
             for new_point in new_candidates:
                     candidates_to_add.append(new_point.pt)
             
