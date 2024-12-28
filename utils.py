@@ -301,11 +301,12 @@ class DrawTrajectory():
 
         # Get information from Bootstrapping object
         p = b.keypoints
+        c = []
         x = b.triangulated_points
         self.frame = b.init_frames[-1]
         im = b.data_loader[self.frame]
 
-        c_map = plt.get_cmap("nipy_spectral")  # cmap style (if mark_depth)
+        c_map = plt.get_cmap("plasma")  # cmap style (if mark_depth)
 
         # Computing the location of the camera, saving the x and z components
         c_R_cw = b.transformation_matrix[:, :3]
@@ -345,8 +346,10 @@ class DrawTrajectory():
 
         # Upper plot:
         self.u_im = self.u.imshow(im, cmap="grey")
+        self.u_candidatepoints = self.u.scatter(p[:, 0], p[:, 1], marker="x",
+                                          alpha=0.5, c='g', s=25)
         self.u_keypoints = self.u.scatter(p[:, 0], p[:, 1], marker="o",
-                                          alpha=0.5, cmap=c_map, c=z_c, s=2)
+                                          alpha=1, cmap=c_map, c=z_c, s=5)
         self.cbar = self.fig.colorbar(self.u_keypoints, orientation="vertical")
         self.cbar.set_label("Distance from camera, SFM units")
         self.u.set_title("Current image with landmarks")
@@ -390,7 +393,7 @@ class DrawTrajectory():
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
 
-    def update_data(self, t: np.array, p: np.array, x: np.array,
+    def update_data(self, t: np.array, p: np.array, x: np.array, c: np.array,
                     im: np.array):
         """
         Update the plot
@@ -428,6 +431,7 @@ class DrawTrajectory():
         # Upper plot
         self.u_im.set(data=im)
         self.u_keypoints.set_offsets(p)
+        self.u_candidatepoints.set_offsets(c)
         self.r_landmarks.set_array(z_c)  # Upadte the colour mapping
         self.u_keypoints.set_array(z_c)
 

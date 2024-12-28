@@ -64,7 +64,7 @@ class VO:
         
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
-        self.angle_threshold = 0.04
+        self.angle_threshold = 0.01
 
         self.sift = cv2.SIFT_create(sigma=2, nOctaveLayers=3, edgeThreshold=10, nfeatures=50)
 
@@ -134,10 +134,6 @@ class VO:
         
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
-
-        print("P_i_tracked:", P_i_tracked.shape)
-        print("Pi_1:", self.Pi_1.shape)
-        print("Xi_1:", self.Xi_1.shape)
 
         # Step 2: Run PnP to get pose for the new frame
         
@@ -227,7 +223,7 @@ class VO:
 
             if p_in_camera[2] < 0:
                 triangulated_point_w = triangulated_point_w * -1
-                print("behind???")
+                #print("behind???")
 
             triangulated_point_w = triangulated_point_w[:3]
             triangulate_points_w[i] = triangulated_point_w.reshape(-1)
@@ -237,7 +233,6 @@ class VO:
         self.Pi_1 = np.vstack([self.Pi_1, masked_candidate_is])  # Stack candidates that match threshold
         self.Xi_1 = np.vstack([self.Xi_1, triangulate_points_w])  # Stack triangulated points
 
-        print(len(masked_candidate_is))
         # back to unfiltered array to remove added points from tracking
         filtered_indices = np.where(C_i_tracked)[0]  # Get indices of tracked candidate points
         new_filter_unfiltered = np.zeros_like(C_i_tracked, dtype=bool)
@@ -248,6 +243,9 @@ class VO:
         # how many true values in C_i_tracked?
         num_true = np.sum(C_i_tracked)
         print(f"Number of true values in C_i_tracked: {num_true}")
+        print(f"Number of true values added to tracking data: {len(masked_candidate_is)}")
+        print(f"total tracking data: {len(self.Pi_1)}")
+
 
         self.Ci_1 = C_i[C_i_tracked]
         self.Fi_1 = self.Fi_1[C_i_tracked]
@@ -256,22 +254,51 @@ class VO:
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
-        if (len(self.Ci_1) <= self.max_keypoints or self.frames_since_last_sift > 0) and True:
+        w = img_i.shape[1]
+        total = len(self.Ci_1)
+        left_of_screen = np.sum(self.Ci_1[:, 0] < w/3)
+        right_of_screen = np.sum(self.Ci_1[:, 0] > w/3)
+
+        if (total <= self.max_keypoints or self.frames_since_last_sift > 500 or (left_of_screen < total/3 and left_of_screen < 100) or (right_of_screen < total/3 and right_of_screen < 100)) and True:
+            
+            old_features = np.row_stack((self.Pi_1, self.Ci_1))
 
             self.frames_since_last_sift = 0
-            feature_add_count = int(max(len(self.Pi_1)*1.3, len(self.Pi_1) + 100))
+            #feature_add_count = int(max(len(old_features)*2, 100))
+            feature_add_count = 500
+            self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
 
-            self.sift = cv2.SIFT_create(sigma=2.5, nOctaveLayers=3, edgeThreshold=10, nfeatures=feature_add_count)
+            mask = np.ones(img_i.shape, dtype=np.uint8) * 255  # Start with full mask
+            for kp in old_features:
+                cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int(10 * w/1000), color=0, thickness=-1)
+            sift_img = img_i.copy()  # Copy the original image to work on it
 
-            new_candidates = self.sift.detect(img_i, None)
-            new_candidates = [kp for kp in new_candidates if kp.response > 0.001]
+            sift_img[mask == 0] = 255
+
+            if total <= self.max_keypoints:
+                new_candidates = self.sift.detect(sift_img, mask)
+            elif left_of_screen < total/3:
+                left_half = sift_img[:, :w // 3]  # Left half
+                left_mask = mask[:, :w // 3]
+                new_candidates = self.sift.detect(left_half, left_mask)
+
+            elif right_of_screen < total/3:
+                right_half = sift_img[:, w*2 // 3:]  # Right half
+                right_mask = mask[:, w*2 // 3:]
+                new_candidates = self.sift.detect(right_half, right_mask)
+                # add w//2 to every x coorndiate
+                for c in new_candidates:
+                    c.pt = (c.pt[0] + w*2 // 3, c.pt[1])
+
+
+            #new_candidates = [kp for kp in new_candidates if kp.response > 0.0001]
             candidates_to_add = []
-            poses_to_add = []
-            for new_point in new_candidates:
-                if is_new_keypoint(new_point, np.row_stack((self.Pi_1, self.Ci_1)), self.sift_keypoint_similarity_threshold):
-                    candidates_to_add.append(new_point.pt)
-                    poses_to_add.append(self.T_Ci_1__w.flatten())
 
+            for new_point in new_candidates:
+                    candidates_to_add.append(new_point.pt)
+            
+            poses_to_add = np.tile(self.T_Ci_1__w.flatten(), (len(candidates_to_add), 1))
+            
             print(f"Added keypoint count: {len(candidates_to_add)}")
             if debug and self.Debug.SIFT in debug:
                 print(len(candidates_to_add))
@@ -280,12 +307,13 @@ class VO:
                 self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
                 self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
                 self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
+
             if self.Debug.TRIANGULATION:
                 self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
-        return self.T_Ci_1__w, self.Pi_1, self.Xi_1
+        return self.T_Ci_1__w, self.Pi_1, self.Xi_1, self.Ci_1
 
 
     def draw_keypoint_tracking(self):

@@ -8,8 +8,8 @@ from initialise_vo import Bootstrap, DataLoader
 from utils import DrawTrajectory
 
 
-dl = DataLoader("kitti")
-b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(350, 355))
+dl = DataLoader("parking")
+#b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(350, 355))
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(70, 75))
 
 vo = VO(b)
@@ -25,8 +25,8 @@ for image in dl[75:600]:
     # if index == 28 or index == 29 or index == 30:
     #     p_new, pi, xi = vo.process_frame(image, debug=[VO.Debug.KLT])
     # else:
-    p_new, pi, xi = vo.process_frame(image, debug=[])
-    dt.update_data(p_new, pi, xi, image)
+    p_new, pi, xi, ci = vo.process_frame(image, debug=[])
+    dt.update_data(p_new, pi, xi, ci, image)
     print(p_new)
 input()
 # vo.next_image()
