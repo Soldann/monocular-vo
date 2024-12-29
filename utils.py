@@ -8,6 +8,8 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 import cv2
+from arrow_3d import Arrow3D
+
 
 linear_LS_triangulation_C = -np.eye(2, 3)
 def linear_LS_triangulation(u1, P1, u2, P2):
@@ -277,6 +279,56 @@ def rotation_matrix_to_euler_angles(R):
     # Return as degrees
     return np.degrees(pitch), np.degrees(roll), np.degrees(yaw)
 
+def drawCamera(ax, position, direction, length_scale = 1, head_size = 10, 
+        equal_axis = True, set_ax_limits = True):
+    # Draws a camera consisting of arrows into a 3d Plot
+    # ax            axes object, creates as follows
+    #                   fig = plt.figure()
+    #                   ax = fig.add_subplot(projection='3d')
+    # position      np.array(3,) containing the camera position
+    # direction     np.array(3,3) where each column corresponds to the [x, y, z]
+    #               axis direction
+    # length_scale  length scale: the arrows are drawn with length
+    #               length_scale * direction
+    # head_size     controls the size of the head of the arrows
+    # equal_axis    boolean, if set to True (default) the axis are set to an 
+    #               equal aspect ratio
+    # set_ax_limits if set to false, the plot box is not touched by the function
+
+    arrow_prop_dict = dict(mutation_scale=head_size, arrowstyle='-|>', color='r')
+    a = Arrow3D([position[0], position[0] + length_scale * direction[0, 0]],
+                [position[1], position[1] + length_scale * direction[1, 0]],
+                [position[2], position[2] + length_scale * direction[2, 0]],
+                **arrow_prop_dict)
+    ax.add_artist(a)
+    arrow_prop_dict = dict(mutation_scale=head_size, arrowstyle='-|>', color='g')
+    a = Arrow3D([position[0], position[0] + length_scale * direction[0, 1]],
+                [position[1], position[1] + length_scale * direction[1, 1]],
+                [position[2], position[2] + length_scale * direction[2, 1]],
+                **arrow_prop_dict)
+    ax.add_artist(a)
+    arrow_prop_dict = dict(mutation_scale=head_size, arrowstyle='-|>', color='b')
+    a = Arrow3D([position[0], position[0] + length_scale * direction[0, 2]],
+                [position[1], position[1] + length_scale * direction[1, 2]],
+                [position[2], position[2] + length_scale * direction[2, 2]],
+                **arrow_prop_dict)
+    ax.add_artist(a)
+
+    if not set_ax_limits:
+        return
+
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    zlim = ax.get_zlim()
+    ax.set_xlim([min(xlim[0], position[0]), max(xlim[1], position[0])])
+    ax.set_ylim([min(ylim[0], position[1]), max(ylim[1], position[1])])
+    ax.set_zlim([min(zlim[0], position[2]), max(zlim[1], position[2])])
+    
+    # This sets the aspect ratio to 'equal'
+    if equal_axis:
+        ax.set_box_aspect((np.ptp(ax.get_xlim()),
+                       np.ptp(ax.get_ylim()),
+                       np.ptp(ax.get_zlim())))
 
 class DrawTrajectory():
 
@@ -333,15 +385,16 @@ class DrawTrajectory():
         # Plot settings
         plt.ion()
         self.fig, axs = plt.subplot_mosaic(
-            [["u", "u", "u"], ["m", "l", "r"]],
+            [["u", "u"], [ "l", "r"]],
             figsize=(10, 8),                     # (width x height)
             layout="constrained"
         )
         self.u = axs["u"]
-        #self.l = self.fig.add_subplot(2, 3, 5)
-        self.l = axs["l"]
+        self.l = self.fig.add_subplot(2, 2, 3, projection="3d")
+
+        #self.l = axs["l"]
         self.r = axs["r"]
-        self.m = axs["m"]
+        #self.m = axs["m"]
         self.fig.suptitle(f"Image i = {self.frame}")
 
         # Upper plot:
@@ -369,11 +422,18 @@ class DrawTrajectory():
         self.r.set_title("Landmarks $P$ in world frame")
 
         # Left: xz camera position
-        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_z, color='blue', linewidth=2)[0]
-        self.l.grid(visible=True)
-        self.l.set_xlabel("Camera poses in world frame")
+        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_y, self.w_t_wc_z)[0]
+        drawCamera(self.l, w_t_wc, c_R_cw)
         self.l.set_xlabel("$X_w$ - SFM units")
         self.l.set_ylabel("$Z_w$ - SFM units")
+        self.l.set_zlabel("$Y_w$ - SFM units")
+        self.l.autoscale(False)
+
+
+        #self.l.grid(visible=True)
+        # self.l.set_xlabel("Camera poses in world frame")
+        # self.l.set_xlabel("$X_w$ - SFM units")
+        # self.l.set_ylabel("$Z_w$ - SFM units")
 
 
         # camera rotation
@@ -381,11 +441,11 @@ class DrawTrajectory():
         angles = [roll, yaw, pitch]
         labels = ['Pitch', 'Roll', 'Yaw']
         colors = ['r', 'g', 'b']
-        self.m_pos = self.m.bar(labels, angles, color=colors)
-        self.m.set_title("Pitch, Roll, and Yaw Angles")
-        self.m.set_ylabel("Angle (degrees)")
-        self.m.set_ylim([-180, 180])
-        self.m.grid(True)
+        # self.m_pos = self.m.bar(labels, angles, color=colors)
+        # self.m.set_title("Pitch, Roll, and Yaw Angles")
+        # self.m.set_ylabel("Angle (degrees)")
+        # self.m.set_ylim([-180, 180])
+        # self.m.grid(True)
 
         if self.save:
             self.fig.savefig(self.plot_dir_dataset.joinpath(f"{self.frame:0{4}}.jpg"))
@@ -413,8 +473,9 @@ class DrawTrajectory():
             - Image
         """
 
-        ### ------- PROCESS DATA ------- ###
 
+        ### ------- PROCESS DATA ------- ###
+        
         # Computing the current location of the camera, saving x and z comp.
         c_R_cw = t[:, :3]
         c_t_cw = t[:, -1]
@@ -442,14 +503,20 @@ class DrawTrajectory():
         self.r_prev_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
 
         # Left plot
-        self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
-        #self.l_pos.set_3d_properties(self.w_t_wc_z)
+        self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_y)
+        self.l_pos.set_3d_properties(self.w_t_wc_z)
+        for artist in self.l.get_children():
+            print(artist)
+            if isinstance(artist, Arrow3D):  # Check if it's a Line2D object
+                artist.remove()
+
+        drawCamera(self.l, w_t_wc, c_R_cw.T)
 
         # rotation plot
         r, p, y = rotation_matrix_to_euler_angles(c_R_cw)
-        self.m_pos[0].set_height(r)  # Update the plot data with new values
-        self.m_pos[1].set_height(p)
-        self.m_pos[2].set_height(y)
+        # self.m_pos[0].set_height(r)  # Update the plot data with new values
+        # self.m_pos[1].set_height(p)
+        # self.m_pos[2].set_height(y)
 
         ### ------- UPDATE FIGURE SCALE ------- ###
 
@@ -457,11 +524,16 @@ class DrawTrajectory():
         # Compute the limits for the plot; same scale for both axes
         l_xmin, l_xmax = min(self.w_t_wc_x) - 1, max(self.w_t_wc_x) + 1
         l_zmin, l_zmax = min(self.w_t_wc_z) - 1, max(self.w_t_wc_z) + 1
-        max_range = max(l_xmax - l_xmin, l_zmax - l_zmin)
+        l_ymin, l_ymax = min(self.w_t_wc_y) - 1, max(self.w_t_wc_y) + 1
+
+        max_range = max(l_xmax - l_xmin, l_zmax - l_zmin, l_ymax - l_ymin)
         mid_x = 0.5 * (l_xmin + l_xmax)
         mid_z = 0.5 * (l_zmin + l_zmax)
+        mid_y = 0.5 * (l_ymin + l_ymax)
+
         self.l.set_xlim(mid_x - 0.5 * max_range, mid_x + 0.5 * max_range)
-        self.l.set_ylim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
+        self.l.set_ylim(mid_y - 0.5 * max_range, mid_y + 0.5 * max_range)
+        self.l.set_zlim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
 
         # Right plot
         # Making sure the landmark positions are visible:

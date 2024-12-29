@@ -8,9 +8,9 @@ from initialise_vo import Bootstrap, DataLoader
 from utils import DrawTrajectory
 
 
-dl = DataLoader("parking")
-#b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(350, 355))
-b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(70, 75))
+dl = DataLoader("own_1")
+b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(360, 370))
+#b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(75, 80))
 
 vo = VO(b)
 b.draw_all()
@@ -18,7 +18,7 @@ dt = DrawTrajectory(b, save=False)
 print(b.transformation_matrix)
 
 index = 0
-for image in dl[75:600]:
+for image in dl[370:700]:
     # debug=[VO.Debug.KLT]
     index += 1
     print("Frame", index)

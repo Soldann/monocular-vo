@@ -139,8 +139,8 @@ class VO:
         # Step 2: Run PnP to get pose for the new frame
         
         success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
-        if ransac_inliers is None or len(ransac_inliers) < 15:
-            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=16, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        if ransac_inliers is None or len(ransac_inliers) < len(self.Pi_1)/2:
+            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
 
         ransac_inliers = ransac_inliers.flatten()
         self.Pi_1 = self.Pi_1[ransac_inliers] # Update Pi with ransac
@@ -148,6 +148,8 @@ class VO:
 
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
         R_cw, _ = cv2.Rodrigues(r_cw)# rotation vector world to camera frame
+        print(r_cw)
+        print(R_cw)
         self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))
         
         R_w_Ci = self.T_Ci_1__w[:3,:3].T # rotation vector from Ci to world is inverse or rotation vector world to Ci
@@ -223,11 +225,20 @@ class VO:
             p_in_camera = p_in_camera[:3] / p_in_camera[3]  # Normalize the point
 
             if p_in_camera[2] < 0:
-                triangulated_point_w = triangulated_point_w * -1
+                pass
+                #triangulated_point_w = triangulated_point_w * -1
+                triangulated_point_w = triangulated_point_w * 0
                 #print("behind???")
 
             triangulated_point_w = triangulated_point_w[:3]
+        
             triangulate_points_w[i] = triangulated_point_w.reshape(-1)
+
+        # remove close to 0
+        # Step 4: Filter out close to zero values
+        mask = np.all(np.abs(triangulate_points_w) > 0.1, axis=1)
+        triangulate_points_w = triangulate_points_w[mask]
+        masked_candidate_is = masked_candidate_is[mask]
 
 
         # Step 5: Add candidates that match thresholds to sets
@@ -257,8 +268,8 @@ class VO:
         # TODO: Implement this step
         h, w = img_i.shape
         total = len(self.Ci_1)
-        left_of_screen = np.sum(self.Ci_1[:, 0] < w/3)
-        right_of_screen = np.sum(self.Ci_1[:, 0] > w/3)
+        left_of_screen = np.sum(self.Ci_1[:, 0] < w/4)
+        right_of_screen = np.sum(self.Ci_1[:, 0] > w/4)
 
         if (total <= self.max_keypoints or self.frames_since_last_sift > 500 or (left_of_screen < total/3 and left_of_screen < 100) or (right_of_screen < total/3 and right_of_screen < 100)) and True:
             
@@ -266,12 +277,12 @@ class VO:
 
             self.frames_since_last_sift = 0
             #feature_add_count = int(max(len(old_features)*2, 100))
-            feature_add_count = 400
+            feature_add_count = 500 * 1000//len(self.Pi_1)
             self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
 
             sift_img = img_i.copy()  # Copy the original image to work on it
             
-            split_count_w = 4
+            split_count_w = 5
             split_count_h = 3
             border_to_remove_w = w % split_count_w
             border_to_remove_h = h % split_count_h
@@ -282,7 +293,7 @@ class VO:
 
             mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
             for kp in old_features:
-                cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int(10 * w/1000), color=0, thickness=-1)
+                cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int((10 * w/1000) * (len(P_i) / 300)), color=0, thickness=-1)
             
             blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
             mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
@@ -295,10 +306,10 @@ class VO:
                 block = blocks[idx]  # Get the current block
                 mask_block = mask_blocks[idx]  # Get the corresponding mask block
 
-                if right_of_screen < total/3.0 and idx % split_count_w <= split_count_w*2 // 3:
-                    continue
-                if left_of_screen < total/3.0 and idx % split_count_w >= split_count_w // 3:
-                    continue
+                # if right_of_screen < total/3.0 and idx % split_count_w <= split_count_w*2 // 3:
+                #     continue
+                # elif left_of_screen < total/3.0 and idx % split_count_w >= split_count_w // 3:
+                #     continue
                 
                 row = idx // split_count_w
                 col = idx % split_count_w
@@ -307,12 +318,18 @@ class VO:
                 block_offset = np.array([offset_x, offset_y])
                 keypoints = self.sift.detect(block, mask_block)
             
-                for keypoint in keypoints:
-                    if keypoint.response < 0.0001:
-                        continue
+                supposed_len = 10 * 1000//len(self.Pi_1)
+                for keypoint in sorted(keypoints, key=lambda k: -k.response)[:supposed_len]:
                     keypoint.pt += block_offset
                     new_candidates.append(keypoint)
-            
+                
+                if(len(keypoints) < supposed_len):
+                    # do Shi-Tomasi
+                    corners = cv2.goodFeaturesToTrack(block, maxCorners=50, qualityLevel=0.1, minDistance=60)
+                    if corners is not None:
+                        for corner in corners:
+                            new_candidates.append(cv2.KeyPoint(corner[0][0] + offset_x, corner[0][1] + offset_y, 1))
+
             print(f"Time taken for {blocks.shape[0]} blocks: {time.time() - t} seconds")
 
             # if total <= self.max_keypoints:
