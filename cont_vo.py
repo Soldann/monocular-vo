@@ -266,7 +266,7 @@ class VO:
 
             self.frames_since_last_sift = 0
             #feature_add_count = int(max(len(old_features)*2, 100))
-            feature_add_count = 250
+            feature_add_count = 400
             self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
 
             sift_img = img_i.copy()  # Copy the original image to work on it
@@ -295,9 +295,9 @@ class VO:
                 block = blocks[idx]  # Get the current block
                 mask_block = mask_blocks[idx]  # Get the corresponding mask block
 
-                if right_of_screen < total/3.0 and idx % split_count_w < split_count_w*2 // 3:
+                if right_of_screen < total/3.0 and idx % split_count_w <= split_count_w*2 // 3:
                     continue
-                if left_of_screen < total/3.0 and idx % split_count_w > split_count_w // 3:
+                if left_of_screen < total/3.0 and idx % split_count_w >= split_count_w // 3:
                     continue
                 
                 row = idx // split_count_w
@@ -308,6 +308,8 @@ class VO:
                 keypoints = self.sift.detect(block, mask_block)
             
                 for keypoint in keypoints:
+                    if keypoint.response < 0.0001:
+                        continue
                     keypoint.pt += block_offset
                     new_candidates.append(keypoint)
             
