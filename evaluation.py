@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from pathlib import Path
 import pickle
 import numpy as np
+from cv2 import Rodrigues
 
 from utils import inverse_transformation, drawCamera
 
@@ -77,6 +78,17 @@ class TrajectoryEval:
             self.gt_T_wc_array = gt_poses_array.reshape(-1, 4)
             self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
                                  for i in range(self.n_poses)]
+        
+        elif dataset_name == "malaga":
+            
+            # Load ground truth poses
+            gt_poses_path = Path.cwd().joinpath("datasets", "malaga-urban-dataset-extract-07",
+                                                "malaga-urban-dataset-extract-07_all-sensors_GPS.txt")
+            gt_poses_array = np.loadtxt(gt_poses_path.as_posix(), skiprows=1)
+
+            # TODO: finish malaga implementation
+            pass
+        
         else:
 
             raise(NotImplementedError)   
@@ -203,7 +215,6 @@ class TrajectoryEval:
 
         # Rotate the camera frame orientations by R (not rescaling by s):
         R_wc_dash = self.T_wc_array[:, :3] @ R
-        # R_wc_dash = self.T_wc_array[:, :3]  # No transformation of R_wc ?
 
         # Apply the similarity transform to the points w_t_wc
         t_dash = s * w_t_wc @ R.T + t
@@ -213,15 +224,42 @@ class TrajectoryEval:
         self.T_wc_list = [self.T_wc_array[(3 * i):(3 * i + 3)] 
                           for i in range(self.n_poses)]
 
+    
+    def absolue_trajectory_error(self):
         """
-        self.T_wc_list = [np.hstack((R_wc_dash[:, (3 * i):(3 * i + 3)], 
-                                    np.c_[t_dash[i]]))
-                          for i in range(self.n_poses)]
-        self.T_wc_array = np.vstack(self.T_wc_list)
+        Compute the ATE. The trajectories should already be aligned by use
+        of self.similarity_transform_3d() at this point
         """
-             
+
+        """
+        # Vector error measures
+        delta_R = [gt_T_wc[:, :3] @ T_wc[:, :3].T 
+                   for gt_T_wc, T_wc in 
+                   zip(self.gt_T_wc_list, self.T_cw_list)]
+        delta_p = [gt_T_wc[:, 3] - delta_R @ T_wc[:, 3] 
+                   for gt_T_wc, delta_R, T_wc in 
+                   zip(self.gt_T_wc_list, delta_R, self.T_wc_list)]
+        
+        # Compute ATE for rotation
+        angle_delta_R_list = [Rodrigues(delta_R)[0]         # answer in degrees
+                              for delta_R in delta_R]
+        angle_delta_R_array = np.vstack(angle_delta_R_list)
+        ate_rot = np.sqrt(np.sum(angle_delta_R_array**2) / self.n_poses)
+
+        # Compute ATE for position
+        delta_p_array = np.hstack(delta_p)
+        ate_pos = np.sqrt(np.sum(delta_p_array**2) / self.n_poses)
+        """
+
+        # Compute the RMSE as shown on the lecture slides
+
+        RMSE = np.sqrt(np.sum((self.gt_T_wc_array[:, 3] 
+                               - self.T_wc_array[:, 3])**2) / self.n_poses)
+        
+        return RMSE
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="kitti", first_frame=110)
-    te.similarity_transform_3d()
-    te.draw_trajectory(gt=True, add_cam_frame=-1)
+    te = TrajectoryEval(dataset_name="malaga", first_frame=2)
+    # te.similarity_transform_3d()
+    # print(te.absolue_trajectory_error())
+    # te.draw_trajectory(gt=True)
