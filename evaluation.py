@@ -7,7 +7,7 @@ from pathlib import Path
 import pickle
 import numpy as np
 
-from utils import inverse_transformation
+from utils import inverse_transformation, drawCamera
 
 
 class TrajectoryEval:
@@ -64,8 +64,25 @@ class TrajectoryEval:
             self.gt_T_wc_array = gt_poses_array.reshape(-1, 4)
             self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
                                  for i in range(self.n_poses)]
+
+        elif dataset_name == "kitti":
+
+            # Load ground truth poses
+            gt_poses_path = Path.cwd().joinpath("datasets", "kitti", "poses", "05.txt")
+            gt_poses_array = np.loadtxt(gt_poses_path.as_posix())
+
+            # Find the window of ground truth poses that are needed & reshape to list
+            self.n_poses = min(gt_poses_array.shape[0], len(self.T_wc_list))
+            gt_poses_array = gt_poses_array[first_frame:(first_frame + self.n_poses)]
+            self.gt_T_wc_array = gt_poses_array.reshape(-1, 4)
+            self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
+                                 for i in range(self.n_poses)]
+        else:
+
+            raise(NotImplementedError)   
+                 
             
-    def draw_trajectory(self, gt=False):
+    def draw_trajectory(self, gt=False, add_cam_frame=None):
         """
         Draw the VO trajectory; plots the current self.T_wc
 
@@ -73,6 +90,13 @@ class TrajectoryEval:
         1. gt : bool (default: False)
             - Inidicate whether to add the ground truth trajectory to the plot.
             Call self.similarity_transform_3d() before setting this to true
+        2. add_cam_frame : int (default: None)
+            - Add the camera frame (3 arrows) at the corresponding frame index
+            of the VO trajectory. If None: no camera frame is added.
+            The colour coding of the arrows:
+                - c_X : Red
+                - c_Y : Green
+                - c_Z : Blue
         """
 
         w_t_wc__x = self.T_wc_array[0::3, 3]
@@ -120,6 +144,12 @@ class TrajectoryEval:
 
         # Have the camera view be the orientation of the world coord sys.
         ax.view_init(elev=-80, azim=-90, roll=0)
+
+        # Add a camera frame at some position if desired:
+        if add_cam_frame is not None:
+            drawCamera(ax, self.T_wc_list[add_cam_frame][:, 3],
+                    self.T_wc_list[add_cam_frame][:, :3], 
+                    set_ax_limits=False)
         
         plt.show()
 
@@ -172,20 +202,26 @@ class TrajectoryEval:
         # ---------- APPLY SIMILARITY TRANSFORM TO TRAJECTORY ---------- #
 
         # Rotate the camera frame orientations by R (not rescaling by s):
-        R_wc = np.hstack([T_wc[:, :3] for T_wc in self.T_wc_list])
-        R_wc_dash = R @ R_wc
+        R_wc_dash = self.T_wc_array[:, :3] @ R
+        # R_wc_dash = self.T_wc_array[:, :3]  # No transformation of R_wc ?
 
         # Apply the similarity transform to the points w_t_wc
         t_dash = s * w_t_wc @ R.T + t
 
         # Update self.T_wc_array and self.T_wc_list
+        self.T_wc_array = np.hstack((R_wc_dash, t_dash.reshape(-1, 1)))
+        self.T_wc_list = [self.T_wc_array[(3 * i):(3 * i + 3)] 
+                          for i in range(self.n_poses)]
+
+        """
         self.T_wc_list = [np.hstack((R_wc_dash[:, (3 * i):(3 * i + 3)], 
                                     np.c_[t_dash[i]]))
                           for i in range(self.n_poses)]
         self.T_wc_array = np.vstack(self.T_wc_list)
+        """
              
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="parking", first_frame=4)
+    te = TrajectoryEval(dataset_name="kitti", first_frame=110)
     te.similarity_transform_3d()
-    te.draw_trajectory(gt=True)
+    te.draw_trajectory(gt=True, add_cam_frame=-1)

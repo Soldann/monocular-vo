@@ -425,8 +425,8 @@ class DrawTrajectory():
         self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_y, self.w_t_wc_z)[0]
         drawCamera(self.l, w_t_wc, c_R_cw)
         self.l.set_xlabel("$X_w$ - SFM units")
-        self.l.set_ylabel("$Z_w$ - SFM units")
-        self.l.set_zlabel("$Y_w$ - SFM units")
+        self.l.set_ylabel("$Y_w$ - SFM units")
+        self.l.set_zlabel("$Z_w$ - SFM units")
         self.l.autoscale(False)
 
 
