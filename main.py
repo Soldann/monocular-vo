@@ -3,11 +3,12 @@ import cv2
 import matplotlib.pyplot as plt
 from pathlib import Path
 import pickle
- 
+import queue
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
 from utils import DrawTrajectory
-
+import threading
+import time
 
 dl = DataLoader("kitti")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
@@ -16,21 +17,48 @@ vo = VO(b)
 b.draw_all()
 
 dt = DrawTrajectory(b, save=False)
+data_queue = queue.Queue(maxsize=1)  # Only keep the latest data
+poses = []
+processing_done = False
 
-index = 0
-poses = [] 
 
-for image in dl[b.init_frames[1]:]:
-    # debug=[VO.Debug.KLT]
-    index += 1
-    print("Frame", index)
-    # if index == 28 or index == 29 or index == 30:
-    #     p_new, pi, xi = vo.process_frame(image, debug=[VO.Debug.KLT])
-    # else:
-    p_new, pi, xi, ci = vo.process_frame(image, debug=[])
-    #dt.update_data(p_new, pi, xi, ci, image)
-    poses.append(p_new)
-    print(p_new)
+def process_frames():
+    index = 0
+    for image in dl[b.init_frames[1]:30]:
+        # debug=[VO.Debug.KLT]
+        index += 1
+        print("Frame", index)
+        # if index == 28 or index == 29 or index == 30:
+        #     p_new, pi, xi = vo.process_frame(image, debug=[VO.Debug.KLT])
+        # else:
+        p_new, pi, xi, ci = vo.process_frame(image, debug=[])
+        try:
+            data_queue.put((p_new, pi, xi, ci, image), block=False)  # Non-blocking put
+        except queue.Full:
+            pass  # Drop the update if the queue is full
+        poses.append(p_new)
+        print(p_new)
+    
+    processing_done = True
+    
+def update_plot():
+    empty_queue = 0
+    while not processing_done:
+        try:
+            p_new, pi, xi, ci, image = data_queue.get(timeout=0.1)  # Wait for new data
+            dt.update_data(p_new, pi, xi, ci, image)
+            time.sleep(0.1)  # Sleep briefly to avoid busy-waiting
+            empty_queue = 0
+        except queue.Empty:
+            empty_queue += 1
+            if empty_queue > 10:  # If no new data for 1 second, break the loop
+                    break
+
+# Start the data generation in a separate thread
+data_thread = threading.Thread(target=process_frames, daemon=True)
+data_thread.start()
+
+update_plot()
 
 # Save the pose list 
 trajectory_dir = Path.cwd().joinpath("solution_trajectories")
