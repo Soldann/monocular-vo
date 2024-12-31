@@ -148,8 +148,6 @@ class VO:
 
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
         R_cw, _ = cv2.Rodrigues(r_cw)# rotation vector world to camera frame
-        print(r_cw)
-        print(R_cw)
         self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))
         
         R_w_Ci = self.T_Ci_1__w[:3,:3].T # rotation vector from Ci to world is inverse or rotation vector world to Ci
@@ -268,8 +266,8 @@ class VO:
         # TODO: Implement this step
         h, w = img_i.shape
         total = len(self.Ci_1)
-        left_of_screen = np.sum(self.Ci_1[:, 0] < w/4)
-        right_of_screen = np.sum(self.Ci_1[:, 0] > w/4)
+        left_of_screen = np.sum(self.Ci_1[:, 0] < w*3/5)
+        right_of_screen = np.sum(self.Ci_1[:, 0] > w*2/5)
 
         if (total <= self.max_keypoints or self.frames_since_last_sift > 500 or (left_of_screen < total/3 and left_of_screen < 100) or (right_of_screen < total/3 and right_of_screen < 100)) and True:
             
@@ -306,10 +304,10 @@ class VO:
                 block = blocks[idx]  # Get the current block
                 mask_block = mask_blocks[idx]  # Get the corresponding mask block
 
-                # if right_of_screen < total/3.0 and idx % split_count_w <= split_count_w*2 // 3:
-                #     continue
-                # elif left_of_screen < total/3.0 and idx % split_count_w >= split_count_w // 3:
-                #     continue
+                if right_of_screen < total/3.0 and idx % split_count_w <= split_count_w*2 // 3:
+                    continue
+                elif left_of_screen < total/3.0 and idx % split_count_w >= split_count_w // 3:
+                    continue
                 
                 row = idx // split_count_w
                 col = idx % split_count_w

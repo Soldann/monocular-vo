@@ -8,17 +8,16 @@ from initialise_vo import Bootstrap, DataLoader
 from utils import DrawTrajectory
 
 
-dl = DataLoader("own_1")
-b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(360, 370))
-#b = Bootstrap(dl, outlier_tolerance=(15, None, 15), init_frames=(75, 80))
-
+dl = DataLoader("kitti")
+b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
+#b = Bootstrap(dl, outlier_tolerance=(500, 500, 500), init_frames=(0, 10))
 vo = VO(b)
 b.draw_all()
-dt = DrawTrajectory(b, save=False)
-print(b.transformation_matrix)
+
+dt = DrawTrajectory(b, save=True)
 
 index = 0
-for image in dl[370:700]:
+for image in dl[b.init_frames[1]:]:
     # debug=[VO.Debug.KLT]
     index += 1
     print("Frame", index)

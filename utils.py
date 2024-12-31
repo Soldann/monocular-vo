@@ -427,6 +427,9 @@ class DrawTrajectory():
         self.l.set_xlabel("$X_w$ - SFM units")
         self.l.set_ylabel("$Z_w$ - SFM units")
         self.l.set_zlabel("$Y_w$ - SFM units")
+        self.l.set_xlim(5, 5)
+        self.l.set_ylim(5, 5)
+        self.l.set_zlim(5, 5)
         self.l.autoscale(False)
 
 
@@ -506,7 +509,6 @@ class DrawTrajectory():
         self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_y)
         self.l_pos.set_3d_properties(self.w_t_wc_z)
         for artist in self.l.get_children():
-            print(artist)
             if isinstance(artist, Arrow3D):  # Check if it's a Line2D object
                 artist.remove()
 
