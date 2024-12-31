@@ -162,6 +162,10 @@ cython_debug/
 #.idea/
 
 datasets/*
+own_dataset/*
 
 # The saved dataset visualisations:
 vo_plots/*
+
+# The folder of saved solution trajectories:
+solution_trajectories/*

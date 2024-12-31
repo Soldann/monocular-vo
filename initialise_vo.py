@@ -18,7 +18,7 @@ class DataLoader():
 
         ### Parameters
         1. dataset : str
-            - Either "kitti", "malaga", or "parking" 
+            - Either "kitti", "malaga", "parking", "own_1", or "own_2"
         2. malaga_rect : bool
             - Define whether or not the rectified images should be returned
               for the Malaga dataset. If True, load the rectified left images
@@ -121,7 +121,7 @@ class DataLoader():
         elif dataset == "own_1":
             base_path = Path.cwd().joinpath("own_dataset", "ds1")
             
-            # Load camera parameters for Kitti
+            # Load camera parameters
             path_calib_data = base_path.joinpath("mtx_undistorted.txt")
             K = np.loadtxt(path_calib_data, delimiter=',')
             self.K = K
@@ -129,10 +129,10 @@ class DataLoader():
             # The images have been undistorted
             self.dist = None
 
-            # Path to the directory of the images; use image_0 by default
+            # Path to the directory of the images
             self.im_dir = base_path.joinpath("images", "undistorted")
 
-            # List of paths to all the images; use image_0 by default
+            # List of paths to all the images
             self.all_im_paths = list(self.im_dir.glob("*"))
 
             # Number of images in the dataset
@@ -152,10 +152,10 @@ class DataLoader():
             # The images have been undistorted
             self.dist = None
 
-            # Path to the directory of the images; use image_0 by default
+            # Path to the directory of the images
             self.im_dir = base_path.joinpath("images", "undistorted")
 
-            # List of paths to all the images; use image_0 by default
+            # List of paths to all the images
             self.all_im_paths = list(self.im_dir.glob("*"))
 
             # Number of images in the dataset
@@ -165,8 +165,8 @@ class DataLoader():
             self.init_frames = (0, 10)
 
         else:  # The input is not in ("kitti", "parking", "malaga"):
-            raise ValueError("Did not specify one of 'kitti', 'parking'"
-                             +" or 'malaga'")
+            raise ValueError("Did not specify one of 'kitti', 'parking',"
+                             +" 'malaga', 'own_1', or 'own_2'.")
         
 
     def __getitem__(self, index):

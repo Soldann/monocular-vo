@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from pathlib import Path
+import pickle
  
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
@@ -14,9 +15,11 @@ b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 vo = VO(b)
 b.draw_all()
 
-dt = DrawTrajectory(b, save=True)
+dt = DrawTrajectory(b, save=False)
 
 index = 0
+poses = [] 
+
 for image in dl[b.init_frames[1]:]:
     # debug=[VO.Debug.KLT]
     index += 1
@@ -25,8 +28,18 @@ for image in dl[b.init_frames[1]:]:
     #     p_new, pi, xi = vo.process_frame(image, debug=[VO.Debug.KLT])
     # else:
     p_new, pi, xi, ci = vo.process_frame(image, debug=[])
-    dt.update_data(p_new, pi, xi, ci, image)
+    #dt.update_data(p_new, pi, xi, ci, image)
+    poses.append(p_new)
     print(p_new)
+
+# Save the pose list 
+trajectory_dir = Path.cwd().joinpath("solution_trajectories")
+if not trajectory_dir.is_dir():
+    trajectory_dir.mkdir()
+save_path = trajectory_dir.joinpath(f"{dl.dataset_str}.pkl")
+with open(save_path, "wb") as f:
+    pickle.dump(poses, f)
+
 input()
 # vo.next_image()
 # vo.track_keypoints()
