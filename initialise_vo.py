@@ -11,7 +11,7 @@ from mpl_toolkits.mplot3d import proj3d
 
 class DataLoader():
 
-    def __init__(self, dataset: str, malaga_rect=False):
+    def __init__(self, dataset: str, malaga_rect=True):
         """
         Retrieves the images and camera intrinsics for easy switching between
         different datasets.
@@ -83,6 +83,7 @@ class DataLoader():
             k_matrix_path = base_path.joinpath("camera_params_raw_1024x768.txt")
             k_lc = np.zeros((3, 3)).astype(str)    # left camera intrinsics
             k_rc = np.zeros((3, 3)).astype(str)
+            k_lc[2, 2], k_rc[2, 2] = 1., 1.        # set bottom left element to 1
             self.dist = np.zeros(2).astype(str)    # T1, T2 distortion parameters
             with open(k_matrix_path) as txt_file:
                 content = txt_file.readlines()
@@ -274,18 +275,6 @@ class Bootstrap():
                                                          points1[ransac_inliers].T, points2[ransac_inliers].T)
         self.triangulated_points = self.triangulated_points / self.triangulated_points[3]
         self.triangulated_points = self.triangulated_points[:3, :].T
-
-        # Outlier removal: checking if the points are inside the FOV
-        h, w = im1.shape
-        alpha = self.K[0, 0]
-        in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
-        self.triangulated_points = self.triangulated_points[in_FOV]
-        self.keypoints = self.keypoints[in_FOV]
-
-        # Outlier removal: remove points whose z-value greatly deviates from the median
-        z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
-        self.triangulated_points = self.triangulated_points[z_mask]
-        self.keypoints = self.keypoints[z_mask]
 
         # Outlier removal: checking if the points are inside the FOV
         h, w = im1.shape
