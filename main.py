@@ -10,7 +10,7 @@ from utils import DrawTrajectory
 import threading
 import time
 
-dl = DataLoader("kitti")
+dl = DataLoader("malaga")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 #b = Bootstrap(dl, outlier_tolerance=(500, 500, 500), init_frames=(0, 10))
 vo = VO(b)
@@ -23,30 +23,30 @@ processing_done = False
 
 
 def process_frames():
-    index = 0
-    for image in dl[b.init_frames[1]:30]:
+    index = b.init_frames[1]
+    for image in dl[b.init_frames[1]:]:
         # debug=[VO.Debug.KLT]
-        index += 1
         print("Frame", index)
         # if index == 28 or index == 29 or index == 30:
         #     p_new, pi, xi = vo.process_frame(image, debug=[VO.Debug.KLT])
         # else:
         p_new, pi, xi, ci = vo.process_frame(image, debug=[])
         try:
-            data_queue.put((p_new, pi, xi, ci, image), block=False)  # Non-blocking put
+            data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
         except queue.Full:
             pass  # Drop the update if the queue is full
         poses.append(p_new)
         print(p_new)
-    
+        index += 1
+
     processing_done = True
     
 def update_plot():
     empty_queue = 0
     while not processing_done:
         try:
-            p_new, pi, xi, ci, image = data_queue.get(timeout=0.1)  # Wait for new data
-            dt.update_data(p_new, pi, xi, ci, image)
+            p_new, pi, xi, ci, image, idx = data_queue.get(timeout=0.1)  # Wait for new data
+            dt.update_data(p_new, pi, xi, ci, image, idx)
             time.sleep(0.1)  # Sleep briefly to avoid busy-waiting
             empty_queue = 0
         except queue.Empty:

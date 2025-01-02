@@ -457,7 +457,7 @@ class DrawTrajectory():
             self.fig.canvas.flush_events()
 
     def update_data(self, t: np.array, p: np.array, x: np.array, c: np.array,
-                    im: np.array):
+                    im: np.array, idx: int):
         """
         Update the plot
 
@@ -512,7 +512,6 @@ class DrawTrajectory():
             if isinstance(artist, Arrow3D):  # Check if it's a Line2D object
                 artist.remove()
 
-        drawCamera(self.l, w_t_wc, c_R_cw.T)
 
         # rotation plot
         r, p, y = rotation_matrix_to_euler_angles(c_R_cw)
@@ -536,6 +535,7 @@ class DrawTrajectory():
         self.l.set_xlim(mid_x - 0.5 * max_range, mid_x + 0.5 * max_range)
         self.l.set_ylim(mid_y - 0.5 * max_range, mid_y + 0.5 * max_range)
         self.l.set_zlim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
+        drawCamera(self.l, w_t_wc, c_R_cw.T, length_scale=max_range/5)
 
         # Right plot
         # Making sure the landmark positions are visible:
@@ -554,8 +554,7 @@ class DrawTrajectory():
 
         ### ------- UPDATE PLOTS ------- ###
 
-        self.frame += 1
-        self.fig.suptitle(f"Image i = {self.frame}")
+        self.fig.suptitle(f"Image i = {idx}")
         if self.save:
             self.fig.savefig(self.plot_dir_dataset.joinpath(f"{self.frame:0{4}}.jpg"))
         else:
