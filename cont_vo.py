@@ -210,6 +210,125 @@ class VO:
         # zero list for the points
         triangulate_points_w = np.zeros((len(masked_candidate_is), 3))  # (M', 4)
 
+        if debug and self.Debug.TRIANGULATION in debug:
+            point_index = np.where(C_i_tracked)[0][0]
+            candidate_i = C_i[point_index]
+            candidate_f = self.Fi_1[point_index]
+            transformation_fw = self.Ti_1[point_index]
+
+            T_if = multiply_transformation(self.T_Ci_1__w, inverse_transformation(transformation_fw.reshape(3,4)))
+            R_cf = T_if.reshape(3,4)[:,:3]
+            c_t_cf = T_if.reshape(3,4)[:,3][:,None] # column vector
+
+            vector_to_candidate_i = np.linalg.inv(self.K) @ np.append(candidate_i, 1)[:, None]
+            angle_between_baseline_and_point_i = np.arccos(
+                                                            np.dot(c_t_cf.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
+                                                            (np.linalg.norm(c_t_cf) * np.linalg.norm(vector_to_candidate_i))
+                                                            )
+            vector_to_candidate_f = np.linalg.inv(self.K) @ np.append(candidate_f, 1)[:, None]
+            f_t_fc = - R_cf.T @ c_t_cf # Take inverse of R_cf using the transpose since orthonormal
+            angle_between_baseline_and_point_f = np.arccos(
+                                                            np.dot(f_t_fc.reshape(-1), vector_to_candidate_f.reshape(-1)) / 
+                                                            (np.linalg.norm(f_t_fc) * np.linalg.norm(vector_to_candidate_f))
+                                                            )
+            
+            angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
+ 
+            """
+            # Here is some code that does the same as above but using triangulation for the algorithm
+            # You can use it to verify if the above works
+            """
+
+            projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
+            projectionMat2 = self.K @ np.column_stack((R_cf, c_t_cf))
+
+            triangulated_point = cv2.triangulatePoints(projectionMat1, projectionMat2, candidate_f, candidate_i)
+            triangulated_point /= triangulated_point[3]
+            triangulated_point = triangulated_point[:3]
+
+            triangulated_point_in_i = R_cf @ triangulated_point + c_t_cf
+            f_in_i = R_cf @ vector_to_candidate_f + c_t_cf
+            
+            triangulated_point_to_f = f_in_i - triangulated_point_in_i
+            triangulated_point_to_ci = vector_to_candidate_i - triangulated_point_in_i
+
+            angle_between_points_with_triangulation = np.arccos(
+                    np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_f.reshape(-1)) / 
+                    (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
+            )
+
+            """
+            This solution triangulates the points directly in the world frame
+            """
+
+            projection_f = self.K @ transformation_fw.reshape(3,4)
+            projection_Ci = self.K @ self.T_Ci_1__w
+
+            triangulated_point_w = cv2.triangulatePoints(projection_f, projection_Ci, candidate_f, candidate_i)
+            triangulated_point_w /= triangulated_point_w[3]
+            triangulated_point_w = triangulated_point_w[:3]
+
+            transformation_wf = inverse_transformation(transformation_fw.reshape(3,4))
+            f_in_w = transformation_wf[:,:3] @ vector_to_candidate_f + transformation_wf[:,3][:,None]
+            c_in_w = R_w_Ci @ vector_to_candidate_i + w_t_w_Ci
+
+            triangulated_point_w_to_f = f_in_w - triangulated_point_w
+            triangulated_point_w_to_ci = c_in_w - triangulated_point_w
+
+            angle_between_points_with_triangulation_in_world = np.arccos(
+                    np.dot(triangulated_point_w_to_f.reshape(-1), triangulated_point_w_to_ci.reshape(-1)) / 
+                    (np.linalg.norm(triangulated_point_w_to_f) * np.linalg.norm(triangulated_point_w_to_ci))
+            )
+            
+            print("Triangle method: ", angle_between_points)
+            print("Triangulation method: ", angle_between_points_with_triangulation)
+            print("Triangulation method in world frame: ", angle_between_points_with_triangulation_in_world)
+            print("Triangulation method Luca: ", angles_between_points[0])
+
+            # fig = plt.figure(figsize=(14, 5))
+            # gs = fig.add_gridspec(2, 2)
+            # ax1 = fig.add_subplot(gs[0, 0])
+            # ax2 = fig.add_subplot(gs[0, 1])
+            # ax3 = fig.add_subplot(gs[1, 0])
+
+            # # Plot image and KLT results for candidate keypoint tracking
+            # ax1.imshow(self.img_i_1, cmap="grey")
+            # ax2.imshow(img_i, cmap="grey")
+            # ax3.imshow(self.dl[self.debug_ids[point_index]], cmap="grey")
+
+            # a, b = candidate_i.ravel()
+            # c, d = self.Ci_1[point_index].ravel()
+            # e, f = candidate_f.ravel()
+            # ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
+            # ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
+            # ax3.plot((a, c), (b, d), '-', linewidth=2, c="pink")
+
+            # ax1.scatter(c, d, s=5, c="green", alpha=0.5)
+            # ax2.scatter(a, b, s=5, c="red", alpha=0.5)
+            # ax3.scatter(e, f, s=5, c="green", alpha=0.5)
+            # ax1.set_title(f"C_i in Old Image")
+            # ax2.set_title(f"C_i in New Image")
+            # ax3.set_title(F"C_i in Original Image")
+
+            # # Plot triangulation results
+            # ax4 = fig.add_subplot(gs[1, 1], projection='3d')
+            # ax4.view_init(elev=-90, azim=0, roll=-90)
+            # ax4.set_box_aspect((20, 10, 15)) # aspect_x, aspect_y, aspect_z
+            # ax4.set_xlabel("X")
+            # ax4.set_ylabel("Y")
+            # ax4.set_zlabel("Z")
+            # points_to_plot = [
+            #     (triangulated_point_in_i, "red"),
+            #     (np.array([0,0,0]), "black"), # camera i center
+            #     (c_t_cf, "cyan"), # camera f center
+            #     (f_in_i, "green"),
+            #     (vector_to_candidate_i, "magenta"),
+            # ]
+            # for point, colour in points_to_plot:
+            #     ax4.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
+
+            # plt.show()
+
         # nooooo, a for loop
         for i in range(len(masked_candidate_is)):
             projection_f = masked_projection_fs[i]  # (3, 3)
