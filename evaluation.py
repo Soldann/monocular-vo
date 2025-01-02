@@ -80,14 +80,53 @@ class TrajectoryEval:
                                  for i in range(self.n_poses)]
         
         elif dataset_name == "malaga":
-            
-            # Load ground truth poses
-            gt_poses_path = Path.cwd().joinpath("datasets", "malaga-urban-dataset-extract-07",
-                                                "malaga-urban-dataset-extract-07_all-sensors_GPS.txt")
-            gt_poses_array = np.loadtxt(gt_poses_path.as_posix(), skiprows=1)
 
-            # TODO: finish malaga implementation
-            pass
+            # All variables starting with m_ relate to Malaga
+
+            # Path to the txt files
+            m_path = Path.cwd().joinpath("datasets", "malaga-urban-dataset-extract-07")
+            
+            # ----- ALIGN VIDEO AND GPS ----- #
+
+            m_idx_to_time_path = m_path.joinpath("malaga-urban-dataset-extract-07_all"
+                                                 + "-sensors_IMAGES.txt")
+            m_gps_path = m_path.joinpath("malaga-urban-dataset-extract-07_all-sensors"
+                                         +"_GPS.txt")
+
+            # Loading array of when each image was taken (m_idx_to_time)
+            def conv(img_name):
+                return np.float64(img_name[12:29])
+
+            m_idx_to_time = np.loadtxt(m_idx_to_time_path.as_posix(), 
+                                       dtype=np.float64, converters=conv)
+            m_idx_to_time = m_idx_to_time[::2]      # stereo: want only every second
+
+            # Load GPS data
+            m_gps = np.loadtxt(m_gps_path.as_posix(), skiprows=1, usecols=(0, 8, 9, 10))
+
+            # Find the closest time in among the images for each GPS time
+            m_diff = np.abs(m_idx_to_time[:, np.newaxis] - m_gps[:, 0])
+            m_match_idx = np.argmin(m_diff, axis=0)
+
+            # The images where comparison can actually happen
+            m_max_index = min(first_frame + len(self.T_cw_list), m_match_idx[-1])
+            m_gps_mask = (m_match_idx <= m_max_index) & (m_match_idx >= first_frame)
+            m_match_idx = m_match_idx[m_gps_mask]
+            self.n_poses = m_match_idx.shape[0]
+
+            # Format to index an array of stacked T-matrices (T_wc)
+            m_match_idx_Twc = np.c_[3 * m_match_idx, 3 * m_match_idx + 1,
+                                     3 * m_match_idx + 2].flatten()
+
+            # Can only compare at matched locations: restrict T_wc
+            self.T_wc_array = self.T_wc_array[m_match_idx_Twc]
+            self.T_cw_list = [self.T_wc_array[(3 * i):(3 * i + 3)] 
+                              for i in range(self.n_poses)]
+            
+            # The corresponding GPS positions (orientation not given)
+            m_gps_pos = m_gps[m_gps_mask, 1:]
+            self.gt_T_wc_array = np.zeros_like(self.T_wc_array)
+            self.gt_T_wc_array[:, -1] = m_gps_pos.flatten()
         
         else:
 
@@ -259,7 +298,7 @@ class TrajectoryEval:
         return RMSE
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="kitti", first_frame=2)
+    te = TrajectoryEval(dataset_name="malaga", first_frame=3)
     te.similarity_transform_3d()
     print(te.absolue_trajectory_error())
     te.draw_trajectory(gt=True)
