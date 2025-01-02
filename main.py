@@ -10,7 +10,7 @@ from utils import DrawTrajectory
 import threading
 import time
 
-dl = DataLoader("kitti")
+dl = DataLoader("malaga")
 b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
 #b = Bootstrap(dl, outlier_tolerance=(500, 500, 500), init_frames=(0, 10))
 vo = VO(b)
@@ -24,7 +24,7 @@ processing_done = False
 
 def process_frames():
     index = 0
-    for image in dl[b.init_frames[1]:30]:
+    for image in dl[b.init_frames[1]+ 1:]:
         # debug=[VO.Debug.KLT]
         index += 1
         print("Frame", index)

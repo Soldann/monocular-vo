@@ -6,6 +6,7 @@ from enum import Enum
 from typing import List, Optional
 from utils import *
 import time
+from pose_graph_optimizer import PoseGraphOptimizer
 
 class VO:
 
@@ -70,6 +71,9 @@ class VO:
         self.sift = cv2.SIFT_create(sigma=2, nOctaveLayers=3, edgeThreshold=10, nfeatures=50)
 
         self.sift_keypoint_similarity_threshold = 10
+
+        self.pose_optimiser = PoseGraphOptimizer(self.K, self.T_Ci_1__w.copy() )
+        self.pose_optimiser.add_image(self.img_i_1.copy(), self.T_Ci_1__w.copy()) # add if not repeating the second bootstrap image
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
         """
@@ -483,6 +487,11 @@ class VO:
 
             if self.Debug.TRIANGULATION:
                 self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
+
+
+        # Step 7.5? Pose graph optimisation
+        self.pose_optimiser.add_image(img_i,self.T_Ci_1__w.copy())
+        self.pose_optimiser.optimize()
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
