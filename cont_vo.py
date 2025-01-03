@@ -27,8 +27,6 @@ class VO:
               marks and the positions of the corresponding keypoints
         """
 
-        self.frames_since_last_sift = 0
-
         # Setting information from bootstrapping
         self.dl = bootstrap_obj.data_loader                              # data loader
         self.img_i_1 = self.dl[bootstrap_obj.init_frames[-1]]
@@ -104,40 +102,7 @@ class VO:
         
         return tracked_points, tracked
 
-
-    def process_frame(self, img_i: np.array, debug: Optional[List[Debug]] = None):
-        """
-            Runs the continuous pipeline on the image provided, updating internal state wherever necessary
-
-            ### Parameters
-            1. img_i : np.array
-                - numpy image to use as the next frame input
-
-            2. debug : Optional[List[Debug]]
-                - Provide a list of elements from the Enum VO.Debug to trigger additional prints
-                  and visualizations useful for debugging.
-
-            ### Returns
-            - pose : np.array
-                - A (3 x 4) np.array indicating the most recent camera pose. Columns 1 to 3 give
-                R_cw, column 4 gives c_t_cw
-            - X : np.array
-                - Np.array containing the landmarks currently used for camera
-                localisation on its rows. (n x 3). The landmarks are given in
-                the world coordinate system.
-            - P : np.array
-                - The current keypoints in set P belonging to the landmarks
-                X. Shape (n x 2)
-        """
-        self.frames_since_last_sift += 1
-        # Step 1: run KLT  on the points P
-        P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P", self.Debug.KLT in debug if debug else False)
-        
-        self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
-        self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
-
-        # Step 2: Run PnP to get pose for the new frame
-        
+    def pnp_RANSAC(self):
         success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
         if ransac_inliers is None or len(ransac_inliers) < len(self.Pi_1)/2:
             success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
@@ -150,23 +115,25 @@ class VO:
         R_cw, _ = cv2.Rodrigues(r_cw)# rotation vector world to camera frame
         self.T_Ci_1__w = np.column_stack((R_cw, c_t_cw))
         
-        R_w_Ci = self.T_Ci_1__w[:3,:3].T # rotation vector from Ci to world is inverse or rotation vector world to Ci
-        w_t_w_Ci = - R_w_Ci @ self.T_Ci_1__w[:3,3, None] # tranformation vector from Ci to world in world frame, vertical vector
-        
-        # Step 3: Run KLT on candidate keypoints
-        C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C", self.Debug.KLT in debug if debug else False)
+        # R_w_Ci = self.T_Ci_1__w[:3,:3].T # rotation vector from Ci to world is inverse or rotation vector world to Ci
+        # w_t_w_Ci = - R_w_Ci @ self.T_Ci_1__w[:3,3, None] # tranformation vector from Ci to world in world frame, vertical vector
 
-        # Step 4: Calculate angles between each tracked C_i
-        # TODO: Can we do this without a for loop?
-        if debug and self.Debug.TRIANGULATION in debug:
-            self.debug_counter += 1
+        # return R_w_Ci, w_t_w_Ci
 
+    def get_tracked_ci_data(self, C_i, C_i_tracked):
         # get the points
         point_indices = np.where(C_i_tracked)[0]
 
         candidate_is = C_i[point_indices]
         candidate_fs = self.Fi_1[point_indices]
 
+        # rotation matrix for each f point
+        transformation_fw = self.Ti_1[point_indices]
+        transformation_fw = transformation_fw[:, :12].reshape(-1, 3, 4)
+
+        return candidate_is, candidate_fs, transformation_fw
+
+    def get_current_angle_mask(self, candidate_is, candidate_fs, transformation_fw):
         # to homogeneous to apply K
         candidate_is_homogeneous = np.hstack([candidate_is, np.ones((candidate_is.shape[0], 1))])  # (n, 3)
         candidate_fs_homogeneous = np.hstack([candidate_fs, np.ones((candidate_fs.shape[0], 1))])  # (n, 3)   
@@ -177,8 +144,6 @@ class VO:
         vectors_to_candidate_fs = candidate_fs_homogeneous @ inv_K.T
 
         # rotation matrix for each f point
-        transformation_fw = self.Ti_1[point_indices]
-        transformation_fw = transformation_fw[:, :12].reshape(-1, 3, 4)
         transformation_fw_r_tracked = transformation_fw[:, :, :3]  # (M, 3, 3)
         transformation_fw_r_tracked = transformation_fw_r_tracked.transpose(0, 2, 1)  # (M, 3, 3)
 
@@ -198,6 +163,9 @@ class VO:
         # get corresponding triangulations only of the matching ones
         angle_mask = angles_between_points >= self.angle_threshold
         print("Angle mask: ", str(angle_mask.sum()), "of", len(angle_mask))
+        return angle_mask
+
+    def triangulate_points_from_cis(self, candidate_is, candidate_fs, transformation_fw, angle_mask):
 
         masked_candidate_is = candidate_is[angle_mask]  # (M', 3)
         masked_candidate_fs = candidate_fs[angle_mask]  # (M', 3)  
@@ -209,125 +177,6 @@ class VO:
         
         # zero list for the points
         triangulate_points_w = np.zeros((len(masked_candidate_is), 3))  # (M', 4)
-
-        if debug and self.Debug.TRIANGULATION in debug:
-            point_index = np.where(C_i_tracked)[0][0]
-            candidate_i = C_i[point_index]
-            candidate_f = self.Fi_1[point_index]
-            transformation_fw = self.Ti_1[point_index]
-
-            T_if = multiply_transformation(self.T_Ci_1__w, inverse_transformation(transformation_fw.reshape(3,4)))
-            R_cf = T_if.reshape(3,4)[:,:3]
-            c_t_cf = T_if.reshape(3,4)[:,3][:,None] # column vector
-
-            vector_to_candidate_i = np.linalg.inv(self.K) @ np.append(candidate_i, 1)[:, None]
-            angle_between_baseline_and_point_i = np.arccos(
-                                                            np.dot(c_t_cf.reshape(-1), vector_to_candidate_i.reshape(-1)) / 
-                                                            (np.linalg.norm(c_t_cf) * np.linalg.norm(vector_to_candidate_i))
-                                                            )
-            vector_to_candidate_f = np.linalg.inv(self.K) @ np.append(candidate_f, 1)[:, None]
-            f_t_fc = - R_cf.T @ c_t_cf # Take inverse of R_cf using the transpose since orthonormal
-            angle_between_baseline_and_point_f = np.arccos(
-                                                            np.dot(f_t_fc.reshape(-1), vector_to_candidate_f.reshape(-1)) / 
-                                                            (np.linalg.norm(f_t_fc) * np.linalg.norm(vector_to_candidate_f))
-                                                            )
-            
-            angle_between_points = np.pi - angle_between_baseline_and_point_f - angle_between_baseline_and_point_i
- 
-            """
-            # Here is some code that does the same as above but using triangulation for the algorithm
-            # You can use it to verify if the above works
-            """
-
-            projectionMat1 = self.K @ np.column_stack((np.identity(3), np.zeros(3)))
-            projectionMat2 = self.K @ np.column_stack((R_cf, c_t_cf))
-
-            triangulated_point = cv2.triangulatePoints(projectionMat1, projectionMat2, candidate_f, candidate_i)
-            triangulated_point /= triangulated_point[3]
-            triangulated_point = triangulated_point[:3]
-
-            triangulated_point_in_i = R_cf @ triangulated_point + c_t_cf
-            f_in_i = R_cf @ vector_to_candidate_f + c_t_cf
-            
-            triangulated_point_to_f = f_in_i - triangulated_point_in_i
-            triangulated_point_to_ci = vector_to_candidate_i - triangulated_point_in_i
-
-            angle_between_points_with_triangulation = np.arccos(
-                    np.dot(triangulated_point_to_ci.reshape(-1), triangulated_point_to_f.reshape(-1)) / 
-                    (np.linalg.norm(triangulated_point_to_ci) * np.linalg.norm(triangulated_point_to_f))
-            )
-
-            """
-            This solution triangulates the points directly in the world frame
-            """
-
-            projection_f = self.K @ transformation_fw.reshape(3,4)
-            projection_Ci = self.K @ self.T_Ci_1__w
-
-            triangulated_point_w = cv2.triangulatePoints(projection_f, projection_Ci, candidate_f, candidate_i)
-            triangulated_point_w /= triangulated_point_w[3]
-            triangulated_point_w = triangulated_point_w[:3]
-
-            transformation_wf = inverse_transformation(transformation_fw.reshape(3,4))
-            f_in_w = transformation_wf[:,:3] @ vector_to_candidate_f + transformation_wf[:,3][:,None]
-            c_in_w = R_w_Ci @ vector_to_candidate_i + w_t_w_Ci
-
-            triangulated_point_w_to_f = f_in_w - triangulated_point_w
-            triangulated_point_w_to_ci = c_in_w - triangulated_point_w
-
-            angle_between_points_with_triangulation_in_world = np.arccos(
-                    np.dot(triangulated_point_w_to_f.reshape(-1), triangulated_point_w_to_ci.reshape(-1)) / 
-                    (np.linalg.norm(triangulated_point_w_to_f) * np.linalg.norm(triangulated_point_w_to_ci))
-            )
-            
-            print("Triangle method: ", angle_between_points)
-            print("Triangulation method: ", angle_between_points_with_triangulation)
-            print("Triangulation method in world frame: ", angle_between_points_with_triangulation_in_world)
-            print("Triangulation method Luca: ", angles_between_points[0])
-
-            # fig = plt.figure(figsize=(14, 5))
-            # gs = fig.add_gridspec(2, 2)
-            # ax1 = fig.add_subplot(gs[0, 0])
-            # ax2 = fig.add_subplot(gs[0, 1])
-            # ax3 = fig.add_subplot(gs[1, 0])
-
-            # # Plot image and KLT results for candidate keypoint tracking
-            # ax1.imshow(self.img_i_1, cmap="grey")
-            # ax2.imshow(img_i, cmap="grey")
-            # ax3.imshow(self.dl[self.debug_ids[point_index]], cmap="grey")
-
-            # a, b = candidate_i.ravel()
-            # c, d = self.Ci_1[point_index].ravel()
-            # e, f = candidate_f.ravel()
-            # ax1.plot((a, c), (b, d), '-', linewidth=2, c="red")
-            # ax2.plot((a, c), (b, d), '-', linewidth=2, c="green")
-            # ax3.plot((a, c), (b, d), '-', linewidth=2, c="pink")
-
-            # ax1.scatter(c, d, s=5, c="green", alpha=0.5)
-            # ax2.scatter(a, b, s=5, c="red", alpha=0.5)
-            # ax3.scatter(e, f, s=5, c="green", alpha=0.5)
-            # ax1.set_title(f"C_i in Old Image")
-            # ax2.set_title(f"C_i in New Image")
-            # ax3.set_title(F"C_i in Original Image")
-
-            # # Plot triangulation results
-            # ax4 = fig.add_subplot(gs[1, 1], projection='3d')
-            # ax4.view_init(elev=-90, azim=0, roll=-90)
-            # ax4.set_box_aspect((20, 10, 15)) # aspect_x, aspect_y, aspect_z
-            # ax4.set_xlabel("X")
-            # ax4.set_ylabel("Y")
-            # ax4.set_zlabel("Z")
-            # points_to_plot = [
-            #     (triangulated_point_in_i, "red"),
-            #     (np.array([0,0,0]), "black"), # camera i center
-            #     (c_t_cf, "cyan"), # camera f center
-            #     (f_in_i, "green"),
-            #     (vector_to_candidate_i, "magenta"),
-            # ]
-            # for point, colour in points_to_plot:
-            #     ax4.scatter(*point, marker='o', s=5, c=colour, alpha=0.5)
-
-            # plt.show()
 
         # nooooo, a for loop
         for i in range(len(masked_candidate_is)):
@@ -357,6 +206,139 @@ class VO:
         triangulate_points_w = triangulate_points_w[mask]
         masked_candidate_is = masked_candidate_is[mask]
 
+        return triangulate_points_w, masked_candidate_is
+
+    def extract_new_features(self, split_count_w, split_count_h, total, right_too_small, left_too_small):
+        h, w = self.img_i_1.shape
+
+        old_features = np.row_stack((self.Pi_1, self.Ci_1))
+
+        feature_add_count = 500 * 1000//len(self.Pi_1)
+        self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
+
+        sift_img = self.img_i_1.copy()  # Copy the original image to work on it
+        
+        border_to_remove_w = w % split_count_w
+        border_to_remove_h = h % split_count_h
+
+        sift_w = w -border_to_remove_w
+        sift_h = h - border_to_remove_h
+        sift_img = sift_img[:sift_h, :sift_w]
+
+        mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
+        for kp in old_features:
+            cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int((10 * w/1000) * (len(self.Pi_1) / 300)), color=0, thickness=-1)
+        
+        blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
+        mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
+        
+        new_candidates = []
+
+        t = time.time()
+
+        for idx in range(blocks.shape[0]):
+            block = blocks[idx]  # Get the current block
+            mask_block = mask_blocks[idx]  # Get the corresponding mask block
+
+            if right_too_small and idx % split_count_w <= split_count_w*2 // 3:
+                continue
+            elif left_too_small and idx % split_count_w >= split_count_w // 3:
+                continue
+            
+            row = idx // split_count_w
+            col = idx % split_count_w
+            offset_x = col * (sift_w // split_count_w)
+            offset_y = row * (sift_h // split_count_h)
+            block_offset = np.array([offset_x, offset_y])
+            keypoints = self.sift.detect(block, mask_block)
+        
+            supposed_len = 10 * 1000//len(self.Pi_1)
+            for keypoint in sorted(keypoints, key=lambda k: -k.response)[:supposed_len]:
+                keypoint.pt += block_offset
+                new_candidates.append(keypoint.pt)
+            
+            if(len(keypoints) < supposed_len):
+                # do Shi-Tomasi
+                corners = cv2.goodFeaturesToTrack(block, maxCorners=50, qualityLevel=0.1, minDistance=60)
+                if corners is not None:
+                    for corner in corners:
+                        new_candidates.append(np.array([corner[0][0] + offset_x, corner[0][1] + offset_y]))
+
+        print(f"Time taken for {blocks.shape[0]} blocks: {time.time() - t} seconds")
+
+        # if total <= self.max_keypoints:
+        #     new_candidates = self.sift.detect(sift_img, mask)
+        # elif left_of_screen < total/3:
+        #     left_half = sift_img[:, :w // 3]  # Left half
+        #     left_mask = mask[:, :w // 3]
+        #     new_candidates = self.sift.detect(left_half, left_mask)
+
+        # elif right_of_screen < total/3:
+        #     right_half = sift_img[:, w*2 // 3:]  # Right half
+        #     right_mask = mask[:, w*2 // 3:]
+        #     new_candidates = self.sift.detect(right_half, right_mask)
+        #     # add w//2 to every x coorndiate
+        #     for c in new_candidates:
+        #         c.pt = (c.pt[0] + w*2 // 3, c.pt[1])
+
+
+        #new_candidates = [kp for kp in new_candidates if kp.response > 0.0001]
+        
+        poses_to_add = np.tile(self.T_Ci_1__w.flatten(), (len(new_candidates), 1))
+        
+        print(f"Added keypoint count: {len(new_candidates)}")
+
+        if len(new_candidates) > 0:
+            self.Ci_1 = np.row_stack((self.Ci_1, new_candidates))
+            self.Fi_1 = np.row_stack((self.Fi_1, new_candidates))
+            self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
+
+        if self.Debug.TRIANGULATION:
+            self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
+
+    def process_frame(self, img_i: np.array, debug: Optional[List[Debug]] = None):
+        """
+            Runs the continuous pipeline on the image provided, updating internal state wherever necessary
+
+            ### Parameters
+            1. img_i : np.array
+                - numpy image to use as the next frame input
+
+            2. debug : Optional[List[Debug]]
+                - Provide a list of elements from the Enum VO.Debug to trigger additional prints
+                  and visualizations useful for debugging.
+
+            ### Returns
+            - pose : np.array
+                - A (3 x 4) np.array indicating the most recent camera pose. Columns 1 to 3 give
+                R_cw, column 4 gives c_t_cw
+            - X : np.array
+                - Np.array containing the landmarks currently used for camera
+                localisation on its rows. (n x 3). The landmarks are given in
+                the world coordinate system.
+            - P : np.array
+                - The current keypoints in set P belonging to the landmarks
+                X. Shape (n x 2)
+        """
+        # Step 1: run KLT  on the points P
+        P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P", self.Debug.KLT in debug if debug else False)
+        
+        self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
+        self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
+
+        # Step 2: Run PnP to get pose for the new frame
+        self.pnp_RANSAC()
+        
+        # Step 3: Run KLT on candidate keypoints
+        C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C", self.Debug.KLT in debug if debug else False)
+
+        # Step 4: Calculate angles between each tracked C_i
+        if debug and self.Debug.TRIANGULATION in debug:
+            self.debug_counter += 1
+
+        candidate_is, candidate_fs, transformation_fw = self.get_tracked_ci_data(C_i, C_i_tracked)
+        angle_mask = self.get_current_angle_mask(candidate_is, candidate_fs, transformation_fw)
+        triangulate_points_w, masked_candidate_is = self.triangulate_points_from_cis(candidate_is, candidate_fs, transformation_fw, angle_mask)
 
         # Step 5: Add candidates that match thresholds to sets
         self.Pi_1 = np.vstack([self.Pi_1, masked_candidate_is])  # Stack candidates that match threshold
@@ -388,120 +370,14 @@ class VO:
         left_of_screen = np.sum(self.Ci_1[:, 0] < w*3/5)
         right_of_screen = np.sum(self.Ci_1[:, 0] > w*2/5)
 
-        if (total <= self.max_keypoints or self.frames_since_last_sift > 500 or (left_of_screen < total/3 and left_of_screen < 100) or (right_of_screen < total/3 and right_of_screen < 100)) and True:
-            
-            old_features = np.row_stack((self.Pi_1, self.Ci_1))
+        total_too_small = total <= self.max_keypoints
+        left_too_small = left_of_screen < total/3 and left_of_screen < 100
+        right_too_small = right_of_screen < total/3 and right_of_screen < 100
 
-            self.frames_since_last_sift = 0
-            #feature_add_count = int(max(len(old_features)*2, 100))
-            feature_add_count = 500 * 1000//len(self.Pi_1)
-            self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
-
-            sift_img = img_i.copy()  # Copy the original image to work on it
-            
-            split_count_w = 5
-            split_count_h = 3
-            border_to_remove_w = w % split_count_w
-            border_to_remove_h = h % split_count_h
-
-            sift_w = w -border_to_remove_w
-            sift_h = h - border_to_remove_h
-            sift_img = sift_img[:sift_h, :sift_w]
-
-            mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
-            for kp in old_features:
-                cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int((10 * w/1000) * (len(P_i) / 300)), color=0, thickness=-1)
-            
-            blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
-            mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
-            
-            new_candidates = []
-
-            t = time.time()
-
-            for idx in range(blocks.shape[0]):
-                block = blocks[idx]  # Get the current block
-                mask_block = mask_blocks[idx]  # Get the corresponding mask block
-
-                if right_of_screen < total/3.0 and idx % split_count_w <= split_count_w*2 // 3:
-                    continue
-                elif left_of_screen < total/3.0 and idx % split_count_w >= split_count_w // 3:
-                    continue
-                
-                row = idx // split_count_w
-                col = idx % split_count_w
-                offset_x = col * (sift_w // split_count_w)
-                offset_y = row * (sift_h // split_count_h)
-                block_offset = np.array([offset_x, offset_y])
-                keypoints = self.sift.detect(block, mask_block)
-            
-                supposed_len = 10 * 1000//len(self.Pi_1)
-                for keypoint in sorted(keypoints, key=lambda k: -k.response)[:supposed_len]:
-                    keypoint.pt += block_offset
-                    new_candidates.append(keypoint)
-                
-                if(len(keypoints) < supposed_len):
-                    # do Shi-Tomasi
-                    corners = cv2.goodFeaturesToTrack(block, maxCorners=50, qualityLevel=0.1, minDistance=60)
-                    if corners is not None:
-                        for corner in corners:
-                            new_candidates.append(cv2.KeyPoint(corner[0][0] + offset_x, corner[0][1] + offset_y, 1))
-
-            print(f"Time taken for {blocks.shape[0]} blocks: {time.time() - t} seconds")
-
-            # if total <= self.max_keypoints:
-            #     new_candidates = self.sift.detect(sift_img, mask)
-            # elif left_of_screen < total/3:
-            #     left_half = sift_img[:, :w // 3]  # Left half
-            #     left_mask = mask[:, :w // 3]
-            #     new_candidates = self.sift.detect(left_half, left_mask)
-
-            # elif right_of_screen < total/3:
-            #     right_half = sift_img[:, w*2 // 3:]  # Right half
-            #     right_mask = mask[:, w*2 // 3:]
-            #     new_candidates = self.sift.detect(right_half, right_mask)
-            #     # add w//2 to every x coorndiate
-            #     for c in new_candidates:
-            #         c.pt = (c.pt[0] + w*2 // 3, c.pt[1])
-
-
-            #new_candidates = [kp for kp in new_candidates if kp.response > 0.0001]
-            candidates_to_add = []
-            for new_point in new_candidates:
-                    candidates_to_add.append(new_point.pt)
-            
-            poses_to_add = np.tile(self.T_Ci_1__w.flatten(), (len(candidates_to_add), 1))
-            
-            print(f"Added keypoint count: {len(candidates_to_add)}")
-            if debug and self.Debug.SIFT in debug:
-                print(len(candidates_to_add))
-
-            if len(candidates_to_add) > 0:
-                self.Ci_1 = np.row_stack((self.Ci_1, candidates_to_add))
-                self.Fi_1 = np.row_stack((self.Fi_1, candidates_to_add))
-                self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
-
-            if self.Debug.TRIANGULATION:
-                self.debug_ids.extend([self.debug_counter] * len(poses_to_add))
+        if total_too_small or left_too_small or right_too_small:
+            self.extract_new_features(5, 3, total, right_too_small, left_too_small)
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
         return self.T_Ci_1__w, self.Pi_1, self.Xi_1, self.Ci_1
 
-
-    def draw_keypoint_tracking(self):
-        """
-        Call after track_features. Visualises the features tracks over the
-        last image pair
-        """
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.imshow(self.img_i, cmap="gray")
-        u_coord = np.column_stack((self.Pi_1[:, 0], self.Pi[:, 0])) 
-        v_coord = np.column_stack((self.Pi_1[:, 1], self.Pi[:, 1]))
-        ax.scatter(self.Pi_1[:, 0], self.Pi_1[:, 1], marker="o", s=3, alpha=0.6)
-        ax.scatter(self.Pi[:, 0], self.Pi[:, 1], marker="o", s=3, alpha=0.6)
-        ax.plot(u_coord.T, v_coord.T, "-", linewidth=2, alpha=0.9, c="r")
-        ax.set_xlim((0, self.img_i.shape[-1]))
-        ax.set_ylim((self.img_i.shape[0], 0))
-        plt.show(block=True)

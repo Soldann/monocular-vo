@@ -130,8 +130,9 @@ class TrajectoryEval:
         
         else:
 
-            raise(NotImplementedError)   
-                 
+            raise(NotImplementedError)  
+        
+        self.T_wc_array = self.T_wc_array[:self.gt_T_wc_array.shape[0], :]
             
     def draw_trajectory(self, gt=False, add_cam_frame=None):
         """
@@ -217,8 +218,12 @@ class TrajectoryEval:
         # ---------- FIND R, t, s BY UMEYAMA ---------- #
 
         # The point coordinates in a (n x 3) array (...in world coordinates)
-        w_t_wc = self.T_wc_array[:, 3].reshape(-1, 3)
         gt_w_t_wc = self.gt_T_wc_array[:, 3].reshape(-1, 3)
+        w_t_wc = self.T_wc_array[:, 3].reshape(-1, 3)
+
+
+        print(w_t_wc.shape, gt_w_t_wc.shape)
+
 
         # The mean point for the ground truth and estimated trajectors
         mu_p_hat = np.mean(w_t_wc, axis=0)          # mean trajectory point
@@ -298,7 +303,7 @@ class TrajectoryEval:
         return RMSE
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="malaga", first_frame=3)
+    te = TrajectoryEval(dataset_name="kitti", first_frame=3)
     te.similarity_transform_3d()
     print(te.absolue_trajectory_error())
     te.draw_trajectory(gt=True)
