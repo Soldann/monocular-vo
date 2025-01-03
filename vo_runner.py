@@ -9,6 +9,7 @@ from initialise_vo import Bootstrap, DataLoader
 from draw_trajectory import DrawTrajectory
 import threading
 import time
+import matplotlib.pyplot as plt
 
 class VoRunner():
     def __init__(self, dl, b, vo, interval=0.25):
@@ -39,7 +40,14 @@ class VoRunner():
                 pass  # Drop the update if the queue is full
             
             index += 1
-    
+
+        # last update
+        try:
+            self.data_queue.get()
+            self.data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
+        except:
+            pass
+        
     def update_visualizer(self):
         if self.visualizer is None:
             return
@@ -51,13 +59,19 @@ class VoRunner():
                 time.sleep(self.interval)  # Sleep briefly to avoid busy-waiting
             except queue.Empty:
                 pass
+        
+        try: # Final update
+            p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval * 2)  # Wait for new data
+            self.visualizer.update_data(p_new, pi, xi, ci, image, idx)
+        except queue.Empty:
+            pass
     
     def run(self) -> list[np.ndarray]:
+        self.stop_event = threading.Event()  # Event to signal stop
         self.processing = True
         self.poses = []
         self.process_frames()
         self.processing = False
-        self.stop_event = threading.Event()
         return self.poses
     
     def run_and_visualize(self, save=False):
@@ -68,13 +82,17 @@ class VoRunner():
             self.visualizer = None
         
         self.visualizer = DrawTrajectory(self.b, self.on_close, save=save)
-
+        self.processing = True #ensure true due to delayed setting in run thread.
+        
         # Start the data generation in a separate thread
         data_thread = threading.Thread(target=self.run, daemon=True)
         data_thread.start()
         self.update_visualizer()
-        
-        print(len(self.poses))
+
+        while not self.stop_event.is_set():  # Continue until the event is set
+            plt.pause(0.1)
+
+
         return self.poses
 
     def on_close(self, other):

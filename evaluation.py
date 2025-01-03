@@ -131,9 +131,7 @@ class TrajectoryEval:
         else:
 
             raise(NotImplementedError)  
-        
-        self.T_wc_array = self.T_wc_array[:self.gt_T_wc_array.shape[0], :]
-            
+                    
     def draw_trajectory(self, gt=False, add_cam_frame=None):
         """
         Draw the VO trajectory; plots the current self.T_wc
@@ -303,7 +301,7 @@ class TrajectoryEval:
         return RMSE
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="kitti", first_frame=3)
+    te = TrajectoryEval(dataset_name="kitti", first_frame=2)
     te.similarity_transform_3d()
     print(te.absolue_trajectory_error())
     te.draw_trajectory(gt=True)

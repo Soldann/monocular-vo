@@ -46,4 +46,3 @@ if __name__ == "__main__":
     vo_runner = VoRunner(data_loader, bootstrap, visual_odometry_pipeline)
     poses = vo_runner.run_and_visualize(save=False)
     savePoses(poses, data_loader)
-
