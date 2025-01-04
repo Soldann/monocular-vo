@@ -328,3 +328,60 @@ def drawCamera(ax, position, direction, length_scale = 1, head_size = 10,
         ax.set_box_aspect((np.ptp(ax.get_xlim()),
                     np.ptp(ax.get_ylim()),
                     np.ptp(ax.get_zlim())))
+
+
+def find_epipole(Tc1w, Tcw, K):
+    """
+    Find the position of the epipole of image i-1 in the image plane of image i.
+
+    ### Parameters
+    - Tc1w : np.array (3 x 4)
+        - The pose matrix T_(c-1, w) from the world system to camera system C-1
+        (image i-1)
+    - Tcw : np.array (3 x 4)
+        - The pose matrix T_(c, w) from teh world system to camera system c (image
+        i)
+    - K : np.array (3 x 3)
+        - The camera intrinsic matrix
+    """
+
+    # Convention: c1 stands for c-1
+
+    # Extract rotation matrices and translation vectors
+    R_cw = Tcw[:, :3]
+    R_c1w = Tc1w[:, :3]
+    c_t_cw = Tcw[:, 3]
+    c1_t_c1w = Tc1w[:, 3]
+
+    # The rotation matrix form C-1 to C:
+    R_cc1 = R_cw @ R_c1w.T
+
+    # The vector from C-1 to W in C coordinates:
+    c_t_c1w = R_cc1 @ c1_t_c1w
+
+    # The baseline vector b in the C frame:
+    c_b = c_t_c1w - c_t_cw
+
+    # Camera intrinsics. Alpha is approximated as alpha_u
+    alpha = K[0, 0]
+    p0 = K[0:2, 2]      # principal point vector (u0, v0)
+
+    # Finding the intersecion of the image plane of C and the baseline
+    # Formulating the baseline as (x, y, z) = c_b * s. The scalar s at 
+    # the intersection is:
+    # s = alpha / c_b[2]
+
+    # Finding the intersection in image coordinates of C:
+    # intersection = c_b[:2] * s + p0
+
+    # Alternative computation:
+    cn_b = c_b / c_b[2]
+
+    """
+    uv = K @ cn_b
+    intersection = uv[:2]
+    """
+
+    return cn_b
+
+

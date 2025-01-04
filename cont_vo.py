@@ -95,10 +95,15 @@ class VO:
                 # cv2.circle(img_i, (int(a), int(b)), 5, (0, 255, 0), -1)
             
             ax1.scatter(good_previous_points[:, 0], good_previous_points[:, 1], s=5, c="green", alpha=0.5)
+            ax1.scatter(points_to_track[~tracked][:, 0], points_to_track[~tracked][:, 1], s=10 , c="orange",
+                        alpha=0.7, marker="x")
             ax2.scatter(good_tracked_points[:, 0], good_tracked_points[:, 1], s=5, c="red", alpha=0.5)
+            ax2.scatter(tracked_points[~tracked][:, 0], tracked_points[~tracked][:, 1], s=10 , c="orange",
+                        alpha=0.7, marker="x")
+
             ax1.set_title(f"KLT on {name_of_feature} in Old Image")
             ax2.set_title(f"KLT on {name_of_feature} in New Image")
-            plt.show()
+            plt.show(block=True)
         
         return tracked_points, tracked
 
@@ -134,6 +139,17 @@ class VO:
         return candidate_is, candidate_fs, transformation_fw
 
     def get_current_angle_mask(self, candidate_is, candidate_fs, transformation_fw):
+        """
+        What tracked candidate points fulfill the angle criterion?
+
+        ### Returns
+         - angle_mask : np.array
+            - Boolean array with as many elements as were tracked successfully during
+            the last KLT step on C_i. I.e. the same shape as candidate_is or 
+            np.sum(C_i_tracked). The mask is true when the candidate clears the angle
+            threshold
+        """
+
         # to homogeneous to apply K
         candidate_is_homogeneous = np.hstack([candidate_is, np.ones((candidate_is.shape[0], 1))])  # (n, 3)
         candidate_fs_homogeneous = np.hstack([candidate_fs, np.ones((candidate_fs.shape[0], 1))])  # (n, 3)   
@@ -336,6 +352,7 @@ class VO:
         if debug and self.Debug.TRIANGULATION in debug:
             self.debug_counter += 1
 
+        # candidate_is as the keypoint positions of the features in C_i that were tracked
         candidate_is, candidate_fs, transformation_fw = self.get_tracked_ci_data(C_i, C_i_tracked)
         angle_mask = self.get_current_angle_mask(candidate_is, candidate_fs, transformation_fw)
         triangulate_points_w, masked_candidate_is = self.triangulate_points_from_cis(candidate_is, candidate_fs, transformation_fw, angle_mask)
@@ -347,15 +364,22 @@ class VO:
         # back to unfiltered array to remove added points from tracking
         filtered_indices = np.where(C_i_tracked)[0]  # Get indices of tracked candidate points
         new_filter_unfiltered = np.zeros_like(C_i_tracked, dtype=bool)
+        # new_filter_unfiltered: shape of C_i; where candidates were tracked, it takes the vlaue
+        # of angle mask. Then: C_i_tracked of shape C_i bun only true where both tracked & selected
         new_filter_unfiltered[filtered_indices] = angle_mask
         C_i_tracked[new_filter_unfiltered] = False  # Update filtered array with new mask
 
         # Step 7: Update state vectors
-        # how many true values in C_i_tracked?
+        # How many candidates in C_i were tracked from the last iteration?
         num_true = np.sum(C_i_tracked)
-        print(f"Number of true values in C_i_tracked: {num_true}")
-        print(f"Number of true values added to tracking data: {len(masked_candidate_is)}")
-        print(f"total tracking data: {len(self.Pi_1)}")
+        print("Before adding new candidates:")
+        print(f"Total (previous) nr. of candidates: {C_i.shape[0]}")
+        print(f"Number of tracked candidates: {filtered_indices.shape[0]}")
+        print(f"tracked & angle-selected: {angle_mask.sum()}")
+        print(f"Number cand. added to P: {len(masked_candidate_is)}")
+        print(f"Nr. candidates left for next round: {num_true}")
+        print(f"Final # points in P: {len(self.Pi_1)}")
+        print("")
 
 
         self.Ci_1 = C_i[C_i_tracked]
