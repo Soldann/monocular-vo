@@ -14,7 +14,7 @@ class VO:
         TRIANGULATION = 1
         SIFT = 2
 
-    def __init__(self, bootstrap_obj: Bootstrap, max_keypoints=100):
+    def __init__(self, bootstrap_obj: Bootstrap, max_keypoints=700):
         """
         Visual Odometry pipeline.
         
@@ -57,15 +57,12 @@ class VO:
         self.max_keypoints = max_keypoints
 
         # Parameters Lucas Kanade
-        self.lk_params = dict( winSize  = (15, 15),
-                  maxLevel = 3,
-                  criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+        self.lk_params = dict( winSize  = (31, 31),
+                  maxLevel = 5)
         
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
         self.angle_threshold = 0.01
-
-        self.sift = cv2.SIFT_create(sigma=2, nOctaveLayers=3, edgeThreshold=10, nfeatures=50)
 
         self.sift_keypoint_similarity_threshold = 10
 
@@ -74,6 +71,8 @@ class VO:
             Wrapper function for CV2 KLT
         """
         tracked_points, tracked, err = cv2.calcOpticalFlowPyrLK(img_i_1, img_i, points_to_track.astype(np.float32), None, **self.lk_params)
+        if tracked is None:
+            return None, None
         tracked = tracked.astype(np.bool_).flatten()
         
         if debug:
@@ -151,7 +150,7 @@ class VO:
         denominator = old_y * z + old_z * y
 
         # Compute theta for each point pair
-        theta = 2 * np.arctan(numerator/denominator)
+        theta = -2 * np.arctan(numerator/denominator)
         
         return theta
 
@@ -192,7 +191,7 @@ class VO:
         ransac_2d_points = self.Pi_1
         mask = np.ones(len(ransac_2d_points), dtype=bool)
 
-        if self.dl.dataset_str == 'malaga':
+        if self.dl.dataset_str == 'sa':
             unit_p1 = self.reproject_to_unit_sphere_opencv(self.Pi_1, self.K)
             unit_p2 = self.reproject_to_unit_sphere_opencv(self.Pi_old, self.K)
             thetas = self.compute_theta(unit_p1, unit_p2)
@@ -210,12 +209,13 @@ class VO:
             ransac_3d_points = self.Xi_1[mask]
             ransac_2d_points = self.Pi_1[mask]
         
-
-        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
-        # if ransac_inliers is None or len(ransac_inliers) < len(self.Pi_1)/2:
-        #     success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=6, iterationsCount=500) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        if ransac_inliers is None or len(ransac_inliers) < len(ransac_2d_points)/3:
+            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=300) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        #success, r_cw, c_t_cw = cv2.solvePnP(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_ITERATIVE) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
 
         ransac_inliers = ransac_inliers.flatten()
+        #ransac_inliers = np.ones(len(ransac_3d_points), dtype=bool)
         self.Pi_1 = self.Pi_1[mask][ransac_inliers] # Update Pi with ransac
         self.Xi_1 = self.Xi_1[mask][ransac_inliers] # Update Xi with ransac
 
@@ -271,10 +271,11 @@ class VO:
         # get corresponding triangulations only of the matching ones
         angle_mask = angles_between_points >= self.angle_threshold
         print("Angle mask: ", str(angle_mask.sum()), "of", len(angle_mask))
-        return angle_mask
+        return angle_mask, angles_between_points
 
-    def triangulate_points_from_cis(self, candidate_is, candidate_fs, transformation_fw, angle_mask):
+    def triangulate_points_from_cis(self, candidate_is, candidate_fs, transformation_fw, angle_mask, angles_between_points):
 
+        angles_between_points = angles_between_points[angle_mask]  # (M',)
         masked_candidate_is = candidate_is[angle_mask]  # (M', 3)
         masked_candidate_fs = candidate_fs[angle_mask]  # (M', 3)  
         masked_transformation_fw = transformation_fw[angle_mask]
@@ -285,6 +286,12 @@ class VO:
         
         # zero list for the points
         triangulate_points_w = np.zeros((len(masked_candidate_is), 3))  # (M', 4)
+
+        # sort masked_candidate_is by angles_between_points
+
+        # masked_candidate_is = masked_candidate_is[np.argsort(-angles_between_points)]
+        # masked_candidate_fs = masked_candidate_fs[np.argsort(-angles_between_points)]
+        # masked_transformation_fw = masked_transformation_fw[np.argsort(-angles_between_points)]
 
         # nooooo, a for loop
         for i in range(len(masked_candidate_is)):
@@ -316,7 +323,7 @@ class VO:
 
         return triangulate_points_w, masked_candidate_is
 
-    def extract_new_features(self, split_count_w, split_count_h, total, right_too_small, left_too_small):
+    def extract_new_features(self, split_count_w, split_count_h, total, right_too_small, left_too_small, total_too_small):
         h, w = self.img_i_1.shape
 
         old_features = np.row_stack((self.Pi_1, self.Ci_1))
@@ -335,7 +342,7 @@ class VO:
 
         mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
         for kp in old_features:
-            cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int((10 * w/1000) * (len(self.Pi_1) / 300)), color=0, thickness=-1)
+            cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=20, color=0, thickness=-1)
         
         blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
         mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
@@ -347,27 +354,26 @@ class VO:
         for idx in range(blocks.shape[0]):
             block = blocks[idx]  # Get the current block
             mask_block = mask_blocks[idx]  # Get the corresponding mask block
-
-            if right_too_small and idx % split_count_w <= split_count_w*2 // 3:
-                continue
-            elif left_too_small and idx % split_count_w >= split_count_w // 3:
-                continue
+            # if right_too_small and not total_too_small and idx % split_count_w <= split_count_w*2 / 3:
+            #     continue
+            # elif left_too_small and not total_too_small and idx % split_count_w >= split_count_w/ 3:
+            #     continue
             
             row = idx // split_count_w
             col = idx % split_count_w
             offset_x = col * (sift_w // split_count_w)
             offset_y = row * (sift_h // split_count_h)
             block_offset = np.array([offset_x, offset_y])
-            keypoints = self.sift.detect(block, mask_block)
-        
-            supposed_len = 10 * 1000//len(self.Pi_1)
-            for keypoint in sorted(keypoints, key=lambda k: -k.response)[:supposed_len]:
-                keypoint.pt += block_offset
-                new_candidates.append(keypoint.pt)
+            # keypoints = self.sift.detect(block, mask_block)
+            keypoints = []
+            supposed_len = 30 * 1000//len(self.Pi_1)
+            # for keypoint in sorted(keypoints, key=lambda k: -k.response):
+            #     keypoint.pt += block_offset
+                #new_candidates.append(keypoint.pt)
             
-            if(len(keypoints) < supposed_len):
+            if(len(keypoints) < supposed_len) or True:
                 # do Shi-Tomasi
-                corners = cv2.goodFeaturesToTrack(block, maxCorners=50, qualityLevel=0.1, minDistance=60)
+                corners = cv2.goodFeaturesToTrack(block, maxCorners=2500, qualityLevel=0.01, minDistance=20)
                 if corners is not None:
                     for corner in corners:
                         new_candidates.append(np.array([corner[0][0] + offset_x, corner[0][1] + offset_y]))
@@ -428,6 +434,8 @@ class VO:
                 - The current keypoints in set P belonging to the landmarks
                 X. Shape (n x 2)
         """
+        start_t = time.time()
+
         # Step 1: run KLT  on the points P
         P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P", self.Debug.KLT in debug if debug else False)
         
@@ -435,42 +443,59 @@ class VO:
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
 
+        KLT_1_time = time.time() - start_t
+
         # Step 2: Run PnP to get pose for the new frame
         self.pnp_RANSAC()
+
+        RANSAC_t = time.time() - start_t - KLT_1_time
         
         # Step 3: Run KLT on candidate keypoints
         C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C", self.Debug.KLT in debug if debug else False)
+
+        KLT_2_t = time.time() - start_t - KLT_1_time - RANSAC_t
 
         # Step 4: Calculate angles between each tracked C_i
         if debug and self.Debug.TRIANGULATION in debug:
             self.debug_counter += 1
 
-        candidate_is, candidate_fs, transformation_fw = self.get_tracked_ci_data(C_i, C_i_tracked)
-        angle_mask = self.get_current_angle_mask(candidate_is, candidate_fs, transformation_fw)
-        triangulate_points_w, masked_candidate_is = self.triangulate_points_from_cis(candidate_is, candidate_fs, transformation_fw, angle_mask)
+        if C_i_tracked is not None:
+            candidate_is, candidate_fs, transformation_fw = self.get_tracked_ci_data(C_i, C_i_tracked)
+            angle_mask, angles_between_points = self.get_current_angle_mask(candidate_is, candidate_fs, transformation_fw)
+        
+            triangulate_points_w, masked_candidate_is = self.triangulate_points_from_cis(candidate_is, candidate_fs, transformation_fw, angle_mask, angles_between_points)
 
-        # Step 5: Add candidates that match thresholds to sets
-        self.Pi_1 = np.vstack([self.Pi_1, masked_candidate_is])  # Stack candidates that match threshold
-        self.Xi_1 = np.vstack([self.Xi_1, triangulate_points_w])  # Stack triangulated points
+            Angle_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t
 
-        # back to unfiltered array to remove added points from tracking
-        filtered_indices = np.where(C_i_tracked)[0]  # Get indices of tracked candidate points
-        new_filter_unfiltered = np.zeros_like(C_i_tracked, dtype=bool)
-        new_filter_unfiltered[filtered_indices] = angle_mask
-        C_i_tracked[new_filter_unfiltered] = False  # Update filtered array with new mask
+            # 20% original data!
+            triangulate_points_w = triangulate_points_w[:4*len(self.Pi_1), :]
+            masked_candidate_is = masked_candidate_is[:4*len(self.Pi_1), :]
 
-        # Step 7: Update state vectors
-        # how many true values in C_i_tracked?
-        num_true = np.sum(C_i_tracked)
-        print(f"Number of true values in C_i_tracked: {num_true}")
-        print(f"Number of true values added to tracking data: {len(masked_candidate_is)}")
-        print(f"total tracking data: {len(self.Pi_1)}")
+            # Step 5: Add candidates that match thresholds to sets
+            self.Pi_1 = np.vstack([self.Pi_1, masked_candidate_is])  # Stack candidates that match threshold
+            self.Xi_1 = np.vstack([self.Xi_1, triangulate_points_w])  # Stack triangulated points
+
+            # back to unfiltered array to remove added points from tracking
+            filtered_indices = np.where(C_i_tracked)[0]  # Get indices of tracked candidate points
+            new_filter_unfiltered = np.zeros_like(C_i_tracked, dtype=bool)
+            new_filter_unfiltered[filtered_indices] = angle_mask
+            C_i_tracked[new_filter_unfiltered] = False  # Update filtered array with new mask
+
+            # Step 7: Update state vectors
+            # how many true values in C_i_tracked?
+            num_true = np.sum(C_i_tracked)
+            print(f"Number of true values in C_i_tracked: {num_true}")
+            print(f"Number of true values added to tracking data: {len(masked_candidate_is)}")
+            print(f"total tracking data: {len(self.Pi_1)}")
 
 
-        self.Ci_1 = C_i[C_i_tracked]
-        self.Fi_1 = self.Fi_1[C_i_tracked]
-        self.Ti_1 = self.Ti_1[C_i_tracked]
-        self.img_i_1 = img_i
+            self.Ci_1 = C_i[C_i_tracked]
+            self.Fi_1 = self.Fi_1[C_i_tracked]
+            self.Ti_1 = self.Ti_1[C_i_tracked]
+            self.img_i_1 = img_i
+
+        Triangulation_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t
+
 
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
@@ -480,11 +505,28 @@ class VO:
         right_of_screen = np.sum(self.Ci_1[:, 0] > w*2/5)
 
         total_too_small = total <= self.max_keypoints
-        left_too_small = left_of_screen < total/3 and left_of_screen < 100
-        right_too_small = right_of_screen < total/3 and right_of_screen < 100
+        left_too_small = left_of_screen < total/2 and left_of_screen < self.max_keypoints
+        right_too_small = right_of_screen < total/2 and right_of_screen < self.max_keypoints
 
-        if total_too_small or left_too_small or right_too_small:
-            self.extract_new_features(5, 3, total, right_too_small, left_too_small)
+        if total_too_small or left_too_small or right_too_small or True:
+            self.extract_new_features(1, 1, total, right_too_small, left_too_small, total_too_small)
+
+        SIFT_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t
+
+        total_time =  time.time() - start_t
+
+        # print all times
+        print("KLT_1_time:", KLT_1_time)
+        print("RANSAC_t:", RANSAC_t)
+        print("KLT_2_t:", KLT_2_t)
+        print("Angle_t:", Angle_t)
+        print("Triangulation_t:", Triangulation_t)
+        print("SIFT_t:", SIFT_t)
+        print("total_time:", total_time)
+
+
+
+
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already

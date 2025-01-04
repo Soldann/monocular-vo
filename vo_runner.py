@@ -11,13 +11,15 @@ import threading
 import time
 import matplotlib.pyplot as plt
 
+
 class VoRunner():
-    def __init__(self, dl, b, vo, interval=0.25):
+    def __init__(self, dl, b, vo, interval=1):
         self.vo = vo
         self.b = b
         self.dl = dl
         self.poses = []
-        self.data_queue = queue.Queue(maxsize=1)  # Only keep the latest data
+        self.data_queue = queue.Queue(maxsize=3000)  # Only keep the latest data
+
         self.visualizer = None
         self.processing = False
         self.stop_event = threading.Event()
@@ -26,48 +28,46 @@ class VoRunner():
 
     def process_frames(self):
         index = self.b.init_frames[1]
-        for image in self.dl[index:]:
 
+        for image in self.dl[self.b.init_frames[1]:]:
             if self.stop_event.is_set():
+                break
+            
+            if image is None:
                 break
 
             p_new, pi, xi, ci = self.vo.process_frame(image, debug=[])
             self.poses.append(p_new)
-
-            try:
-                self.data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
-            except queue.Full:
-                pass  # Drop the update if the queue is full
-            
-            index += 1
-
-        # last update
-        try:
-            self.data_queue.get()
             self.data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
-        except:
-            pass
+
+            index += 1
         
     def update_visualizer(self):
         if self.visualizer is None:
             return
         
         while self.processing and not self.stop_event.is_set():
-            try:
-                p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval)  # Wait for new data
-                self.visualizer.update_data(p_new, pi, xi, ci, image, idx)
-                time.sleep(self.interval)  # Sleep briefly to avoid busy-waiting
-            except queue.Empty:
-                pass
-        
-        try: # Final update
-            p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval * 2)  # Wait for new data
-            self.visualizer.update_data(p_new, pi, xi, ci, image, idx)
-        except queue.Empty:
-            pass
+            p_news = []
+            p_new, pi, xi, ci, image, idx = None, None, None, None, None, None
+            while not self.data_queue.empty():
+                p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval, block=False)  # Wait for new data
+                p_news.append(p_new)
+            
+            if len(p_news) > 0:
+                self.visualizer.update_data(p_news, pi, xi, ci, image, idx)
+            time.sleep(self.interval) # Sleep briefly to avoid busy-waiting
+
+        # Final update
+        p_news = []
+        p_new, pi, xi, ci, image, idx = None, None, None, None, None, None
+        while not self.data_queue.empty():
+            p_new, pi, xi, ci, image, idx = self.data_queue.get(block=False)  # Wait for new data
+            p_news.append(p_new)
+        if len(p_news) > 0:
+            self.visualizer.update_data(p_news, pi, xi, ci, image, idx)
     
     def run(self) -> list[np.ndarray]:
-        self.stop_event = threading.Event()  # Event to signal stop
+        self.stop_event = threading.Event()
         self.processing = True
         self.poses = []
         self.process_frames()

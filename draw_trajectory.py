@@ -121,7 +121,7 @@ class DrawTrajectory():
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
 
-    def update_data(self, t: np.array, p: np.array, x: np.array, c: np.array,
+    def update_data(self, ts, p: np.array, x: np.array, c: np.array,
                     im: np.array, idx: int):
         """
         Update the plot
@@ -142,15 +142,20 @@ class DrawTrajectory():
         """
 
 
+        for t in ts:
+            # Computing the current location of the camera, saving x and z comp.
+            c_R_cw = t[:, :3]
+            c_t_cw = t[:, -1]
+            w_t_wc = -1 * c_R_cw.T @ c_t_cw
+            self.w_t_wc_x.append(w_t_wc[0])
+            self.w_t_wc_z.append(w_t_wc[2])
+            self.w_t_wc_y.append(w_t_wc[1])
+
+        t = ts[-1]
+
         ### ------- PROCESS DATA ------- ###
         
-        # Computing the current location of the camera, saving x and z comp.
-        c_R_cw = t[:, :3]
-        c_t_cw = t[:, -1]
-        w_t_wc = -1 * c_R_cw.T @ c_t_cw
-        self.w_t_wc_x.append(w_t_wc[0])
-        self.w_t_wc_z.append(w_t_wc[2])
-        self.w_t_wc_y.append(w_t_wc[1])
+
 
         # Computing the depth component
         z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c

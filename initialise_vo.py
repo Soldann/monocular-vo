@@ -28,6 +28,7 @@ class DataLoader():
         
         # Keep name string reference when saving files during visualisation
         self.dataset_str = dataset
+        self.images = []
         
         if dataset == "kitti":
             base_path = Path.cwd().joinpath("datasets", "kitti")
@@ -169,15 +170,20 @@ class DataLoader():
             raise ValueError("Did not specify one of 'kitti', 'parking',"
                              +" 'malaga', 'own_1', or 'own_2'.")
         
+        for frame in self.all_im_paths:
+            self.images.append(cv2.imread(str(frame), cv2.IMREAD_GRAYSCALE))
 
     def __getitem__(self, index):
+
         if isinstance(index, slice):
             start, stop, step = index.indices(len(self.all_im_paths))
             return (self[i] for i in range(start, stop, step))
+        if index >= len(self.images):
+            return None
         else:
-            img_path = str(self.all_im_paths[index])
-            return cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-
+            img = self.images[index]
+            return img
+1
 
 class Bootstrap():
 
