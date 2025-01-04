@@ -261,6 +261,7 @@ class Bootstrap():
         self.E, ransac_inliers = cv2.findEssentialMat(points1, points2, self.K, method=cv2.FM_RANSAC, prob=0.999, threshold=1)
         ransac_inliers = ransac_inliers.astype(np.bool_).reshape(-1)
         self.keypoints = points2[ransac_inliers]
+        self.old_keypoints = points1[ransac_inliers]
         self.candidate_points = points2[~ransac_inliers]
 
         #TODO: remove points behind the camera, too far from the mean, and too far depth wise
@@ -282,13 +283,16 @@ class Bootstrap():
         in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
         self.triangulated_points = self.triangulated_points[in_FOV]
         self.keypoints = self.keypoints[in_FOV]
+        self.old_keypoints = self.old_keypoints[in_FOV]
 
         # Outlier removal: remove points whose z-value greatly deviates from the median
         z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
         self.triangulated_points = self.triangulated_points[z_mask]
         self.keypoints = self.keypoints[z_mask]
+        self.old_keypoints = self.old_keypoints[z_mask]
 
-        return self.keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy(), self.transformation_matrix.copy()
+
+        return self.keypoints.copy(), self.old_keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy(), self.transformation_matrix.copy()
 
     def draw_landmarks(self, aspect_x=20, aspect_y=10, aspect_z=15):
         """

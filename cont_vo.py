@@ -47,7 +47,7 @@ class VO:
         self.distortion_coefficients = None
 
         # landmarks, keypoints, candidate points, transform world to camera position i-1
-        self.Pi_1, self.Xi_1, self.Ci_1, self.T_Ci_1__w = bootstrap_obj.get_points() 
+        self.Pi_1, self.Pi_old, self.Xi_1, self.Ci_1, self.T_Ci_1__w = bootstrap_obj.get_points() 
         self.Fi_1 = self.Ci_1.copy()
 
         self.Ti_1 = np.tile(self.T_Ci_1__w.reshape(-1), (len(self.Ci_1), 1))
@@ -102,14 +102,122 @@ class VO:
         
         return tracked_points, tracked
 
+
+    def reproject_to_unit_sphere_opencv(self, points_2d, K, dist_coeffs=None):
+        """
+        Reprojects 2D image coordinates to 3D points on a unit sphere using OpenCV.
+        
+        Args:
+            points_2d: Array of shape (n, 2) containing 2D image coordinates (u, v).
+            K: Camera matrix of shape (3, 3).
+            dist_coeffs: Distortion coefficients (optional, set to None if no distortion).
+            
+        Returns:
+            np.ndarray: Array of shape (n, 3) containing 3D points on the unit sphere.
+        """
+        # Ensure input points are in the correct shape for cv2.undistortPoints
+        points_2d = np.asarray(points_2d, dtype=np.float32).reshape(-1, 1, 2)
+        
+        # Undistort points (convert to normalized camera coordinates)
+        undistorted_points = cv2.undistortPoints(points_2d, cameraMatrix=K, distCoeffs=dist_coeffs)
+        
+        # Add z' = 1 to the normalized points (to form 3D direction vectors)
+        normalized_points = np.hstack([undistorted_points.squeeze(axis=1), np.ones((len(points_2d), 1))])
+        
+        # Normalize to unit sphere
+        points_on_sphere = normalized_points / np.linalg.norm(normalized_points, axis=1, keepdims=True)
+        
+        return points_on_sphere
+
+    def compute_theta(self, old_P_1, P_1):
+        """
+        Compute theta for each pair of points in old_P_1 and P_1.
+        
+        Args:
+            old_P_1 (numpy.ndarray): Array of shape (n, 3), old point correspondences (x, y, z).
+            P_1 (numpy.ndarray): Array of shape (n, 3), new point correspondences (x, y, z).
+        
+        Returns:
+            numpy.ndarray: Array of shape (n,) containing theta for each point pair.
+        """
+        
+        # Unpack old and new points
+        old_x, old_y, old_z = old_P_1.T
+        x, y, z = P_1.T
+
+        # Compute numerator and denominator for the arctan function
+        # Note the FLIPPED x and y components due to us moving into the y direction.
+        numerator = old_x * z - old_z * x 
+        denominator = old_y * z + old_z * y
+
+        # Compute theta for each point pair
+        theta = 2 * np.arctan(numerator/denominator)
+        
+        return theta
+
+    def find_indices_in_max_bin(self, thetas, num_bins=30):
+        """
+        Bins the given array of thetas into the specified number of bins,
+        finds the bin with the maximum count, and returns the indices of thetas in that bin.
+        
+        Args:
+            thetas: Array of shape (n, 1) or (n,) containing angle values (in radians).
+            num_bins: Number of bins to divide the range of thetas into (default: 180).
+        
+        Returns:
+            indices: Indices of thetas that fall into the bin with the maximum count.
+        """
+        # Flatten the input to ensure it's 1D
+        thetas = thetas.flatten()
+        
+        # Bin thetas into the specified number of bins
+        counts, bin_edges = np.histogram(thetas, bins=num_bins, range=(-np.pi, np.pi))
+        
+        # Find the bin with the maximum count
+        max_bin_idx = np.argmax(counts)
+        print(f"max angle: {bin_edges[max_bin_idx]}")
+        
+        # Determine the range of the max bin
+        bin_min = bin_edges[max_bin_idx -1]
+        bin_max = bin_edges[max_bin_idx + 2]
+        
+        # Find indices of thetas within this bin
+        indices = np.where((thetas >= bin_min) & (thetas < bin_max))[0]
+        
+        return indices
+
+
     def pnp_RANSAC(self):
-        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
-        if ransac_inliers is None or len(ransac_inliers) < len(self.Pi_1)/2:
-            success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(self.Xi_1, self.Pi_1, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        ransac_3d_points = self.Xi_1
+        ransac_2d_points = self.Pi_1
+        mask = np.ones(len(ransac_2d_points), dtype=bool)
+
+        if self.dl.dataset_str == 'malaga':
+            unit_p1 = self.reproject_to_unit_sphere_opencv(self.Pi_1, self.K)
+            unit_p2 = self.reproject_to_unit_sphere_opencv(self.Pi_old, self.K)
+            thetas = self.compute_theta(unit_p1, unit_p2)
+            indices_valid = self.find_indices_in_max_bin(thetas)
+
+            mask = np.zeros(len(thetas), dtype=bool)
+            print(f"1-P RANSAC inlier count: {len(indices_valid)}")
+            if len(indices_valid) < len(thetas)*1/5 or len(indices_valid) < 30: #more than 1/3 of the points are outliers
+                print("Too many outliers. Giving up with constraint.")
+                # give up with the constraint. We tried, we failed.
+                mask = np.ones(len(thetas), dtype=bool)
+
+            mask[indices_valid] = True
+
+            ransac_3d_points = self.Xi_1[mask]
+            ransac_2d_points = self.Pi_1[mask]
+        
+
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=8, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        # if ransac_inliers is None or len(ransac_inliers) < len(self.Pi_1)/2:
+        #     success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=100) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
 
         ransac_inliers = ransac_inliers.flatten()
-        self.Pi_1 = self.Pi_1[ransac_inliers] # Update Pi with ransac
-        self.Xi_1 = self.Xi_1[ransac_inliers] # Update Xi with ransac
+        self.Pi_1 = self.Pi_1[mask][ransac_inliers] # Update Pi with ransac
+        self.Xi_1 = self.Xi_1[mask][ransac_inliers] # Update Xi with ransac
 
         # TODO: c_t_cw is the vector from camera frame to world frame, in the camera coordinates
         R_cw, _ = cv2.Rodrigues(r_cw)# rotation vector world to camera frame
@@ -323,6 +431,7 @@ class VO:
         # Step 1: run KLT  on the points P
         P_i, P_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Pi_1, "P", self.Debug.KLT in debug if debug else False)
         
+        self.Pi_old = self.Pi_1[P_i_tracked]
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
 
