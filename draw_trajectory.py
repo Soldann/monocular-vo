@@ -1,5 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.patches import Polygon
 from matplotlib.colors import Normalize
 from pathlib import Path
 import cv2
@@ -83,6 +84,18 @@ class DrawTrajectory():
         self.cbar.set_label("Distance from camera, SFM units")
         self.u.set_title("Current image with landmarks")
 
+        # The area where candidates are sampled:
+        w, h = im.shape
+        c = [h/2, w/2]
+        rect_w, rect_h = 0.2 * w, 0.2 * h
+        corners = np.array([[c[0] + 10, c[1] + 10],
+                            [c[0] + 10, c[1] - 10],
+                            [c[0] - 10, c[1] - 10],
+                            [c[0] - 10, c[1] + 10]])
+        self.rect = Polygon(corners, closed=True, edgecolor="g", facecolor="none",
+                            linewidth=3)
+        self.u.add_patch(self.rect)
+
         # Right: xz landmark graphic
         self.r_landmarks = self.r.scatter(x[:, 0], x[:, 2], marker="o",
                                           alpha=0.5, cmap=c_map, c=z_c)
@@ -122,7 +135,7 @@ class DrawTrajectory():
             self.fig.canvas.flush_events()
 
     def update_data(self, t: np.array, p: np.array, x: np.array, c: np.array,
-                    im: np.array, idx: int):
+                    im: np.array, idx: int, extremes: np.array):
         """
         Update the plot
 
@@ -152,6 +165,12 @@ class DrawTrajectory():
         self.w_t_wc_z.append(w_t_wc[2])
         self.w_t_wc_y.append(w_t_wc[1])
 
+        corners = np.array([[extremes[0, 0], extremes[1, 1]],
+                            [extremes[0, 1], extremes[1, 1]],
+                            [extremes[0, 1], extremes[1, 0]],
+                            [extremes[0, 0], extremes[1, 0]]])
+        self.rect.set_xy(corners)
+
         # Computing the depth component
         z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c
 
@@ -163,6 +182,7 @@ class DrawTrajectory():
         self.u_candidatepoints.set_offsets(c)
         self.r_landmarks.set_array(z_c)  # Upadte the colour mapping
         self.u_keypoints.set_array(z_c)
+        self.rect.set_xy(corners)
 
         # Right plot
         self.r_pos.set_data([w_t_wc[0]], [w_t_wc[2]])

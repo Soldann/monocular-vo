@@ -377,11 +377,13 @@ def find_epipole(Tc1w, Tcw, K):
     # Alternative computation:
     cn_b = c_b / c_b[2]
 
+    rot_vec = cv2.Rodrigues(R_cc1)[0]
+
     """
     uv = K @ cn_b
     intersection = uv[:2]
     """
 
-    return cn_b
+    return cn_b, rot_vec
 
 

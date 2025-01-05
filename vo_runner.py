@@ -30,11 +30,11 @@ class VoRunner():
             if self.stop_event.is_set():
                 break
 
-            p_new, pi, xi, ci = self.vo.process_frame(image, debug=[])
+            p_new, pi, xi, ci, extremes = self.vo.process_frame(image, debug=[])
             self.poses.append(p_new)
 
             try:
-                self.data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
+                self.data_queue.put((p_new, pi, xi, ci, image, index, extremes), block=False)  # Non-blocking put
             except queue.Full:
                 pass  # Drop the update if the queue is full
             
@@ -46,8 +46,8 @@ class VoRunner():
         
         while self.processing and not self.stop_event.is_set():
             try:
-                p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval)  # Wait for new data
-                self.visualizer.update_data(p_new, pi, xi, ci, image, idx)
+                p_new, pi, xi, ci, image, idx, extremes = self.data_queue.get(timeout=self.interval)  # Wait for new data
+                self.visualizer.update_data(p_new, pi, xi, ci, image, idx, extremes)
                 time.sleep(self.interval)  # Sleep briefly to avoid busy-waiting
             except queue.Empty:
                 pass

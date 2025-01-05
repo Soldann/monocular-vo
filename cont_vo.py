@@ -6,6 +6,7 @@ from enum import Enum
 from typing import List, Optional
 from utils import *
 import time
+from collections import deque
 
 class VO:
 
@@ -64,10 +65,16 @@ class VO:
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
         self.angle_threshold = 0.01
+        # self.angle_threshold = 0.013
 
         self.sift = cv2.SIFT_create(sigma=2, nOctaveLayers=3, edgeThreshold=10, nfeatures=50)
 
         self.sift_keypoint_similarity_threshold = 10
+
+        # ---------- SAMPLING RECT ---------- #
+
+        self.turning_mode = None
+        self.rot_vec = deque([], maxlen=3)
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
         """
@@ -342,8 +349,11 @@ class VO:
         self.Pi_1 = P_i[P_i_tracked] # Update Pi with the points we successfully tracked
         self.Xi_1 = self.Xi_1[P_i_tracked] # Update Xi with the ones we successfully tracked
 
+        # save the previous pose:
+        previous_pose = self.T_Ci_1__w
+
         # Step 2: Run PnP to get pose for the new frame
-        self.pnp_RANSAC()
+        self.pnp_RANSAC()        
         
         # Step 3: Run KLT on candidate keypoints
         C_i, C_i_tracked = self.run_KLT(self.img_i_1, img_i, self.Ci_1, "C", self.Debug.KLT in debug if debug else False)
@@ -387,6 +397,10 @@ class VO:
         self.Ti_1 = self.Ti_1[C_i_tracked]
         self.img_i_1 = img_i
 
+        extremes = self.extract_new_features_epipolar(5, 3, previous_pose, self.T_Ci_1__w)
+        # extremes = self.get_sampling_rect(previous_pose, self.T_Ci_1__w)
+
+        """
         # Step 6: Run SIFT if C is too small to add new candidates
         # TODO: Implement this step
         h, w = img_i.shape
@@ -400,8 +414,239 @@ class VO:
 
         if total_too_small or left_too_small or right_too_small:
             self.extract_new_features(5, 3, total, right_too_small, left_too_small)
+        """
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
-        return self.T_Ci_1__w, self.Pi_1, self.Xi_1, self.Ci_1
+        return self.T_Ci_1__w, self.Pi_1, self.Xi_1, self.Ci_1, extremes
 
+
+    def extract_new_features_epipolar(self, split_count_w, split_count_h, previous_pose,
+                                      current_pose):
+        """
+        Extract new featues only from the rectangle around the epipole of the previous
+        frame projected into the current frame
+        """
+        
+
+        feature_add_count = 500 * 1000//len(self.Pi_1)
+        self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
+        old_features = np.row_stack((self.Pi_1, self.Ci_1))
+
+        extremes = self.get_sampling_rect_mode_based(previous_pose, current_pose)
+
+        sift_img = self.img_i_1.copy()  # Copy the original image to work on it
+        sift_img = sift_img[extremes[1,0]:extremes[1,1],
+                            extremes[0,0]:extremes[0,1]]
+        
+        # proceed with the restricted image as you would with a normal one:
+        
+        h, w = sift_img.shape
+        
+        border_to_remove_w = w % split_count_w
+        border_to_remove_h = h % split_count_h
+
+        sift_w = w -border_to_remove_w
+        sift_h = h - border_to_remove_h
+        sift_img = sift_img[:sift_h, :sift_w]
+        
+        mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
+        for kp in old_features:
+            cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=int((10 * w/1000) * (len(self.Pi_1) / 300)), color=0, thickness=-1)
+
+        blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
+        mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
+        
+        new_candidates = []
+
+        t = time.time()
+
+        for idx in range(blocks.shape[0]):
+            block = blocks[idx]  # Get the current block
+            mask_block = mask_blocks[idx]  # Get the corresponding mask block
+
+            """
+            if right_too_small and idx % split_count_w <= split_count_w*2 // 3:
+                continue
+            elif left_too_small and idx % split_count_w >= split_count_w // 3:
+                continue
+            """
+                
+            row = idx // split_count_w
+            col = idx % split_count_w
+            offset_x = col * (sift_w // split_count_w)
+            offset_y = row * (sift_h // split_count_h)
+            block_offset = np.array([offset_x, offset_y])
+            keypoints = self.sift.detect(block, mask_block)
+        
+            supposed_len = 10 * 1000//len(self.Pi_1)
+            for keypoint in sorted(keypoints, key=lambda k: -k.response)[:supposed_len]:
+                keypoint.pt += block_offset
+                new_candidates.append(keypoint.pt)
+            
+            if(len(keypoints) < supposed_len):
+                # do Shi-Tomasi
+                corners = cv2.goodFeaturesToTrack(block, maxCorners=50, qualityLevel=0.1, minDistance=60)
+                if corners is not None:
+                    for corner in corners:
+                        new_candidates.append(np.array([corner[0][0] + offset_x, corner[0][1] + offset_y]))
+
+        print(f"Time taken for {blocks.shape[0]} blocks: {time.time() - t} seconds")
+
+        """
+        keypoints = self.sift.detect(sift_img, mask)
+        new_candidates = np.array([keypoint.pt for keypoint in keypoints])
+
+        # The coordinates in new_candidates are relative to the sampling area. Transform.
+        if len(new_candidates) > 0:
+            new_candidates += np.c_[extremes[0, 0], extremes[1, 0]]
+
+        
+        fig, axs = plt.subplots(nrows=2)
+        axs[0].imshow(mask, cmap="grey")
+        axs[1].imshow(sift_img, cmap="grey")
+        axs[1].scatter(new_candidates[:, 0], new_candidates[:, 1])
+        plt.show(block=True)
+        """
+
+        print(f"Added keypoint count: {len(new_candidates)}")
+
+        new_candidates = np.array(new_candidates)
+
+        if len(new_candidates) > 0:
+            new_candidates += np.c_[extremes[0, 0], extremes[1, 0]]  # convert back
+            poses_to_add = np.tile(self.T_Ci_1__w.flatten(), (len(new_candidates), 1))
+            self.Ci_1 = np.row_stack((self.Ci_1, new_candidates))
+            self.Fi_1 = np.row_stack((self.Fi_1, new_candidates))
+            self.Ti_1 = np.row_stack((self.Ti_1, poses_to_add))
+
+        return extremes
+
+
+    def get_sampling_rect(self, previous_pose: np.array, current_pose: np.array):
+        """
+        Gets the rectangle around the projection of the last frame's epipole. In this
+        rectangle, features are extracted by extract_new_features_epipolar()
+        """
+
+        w_factor = 10
+        h_factor = 1
+        min_w = 0.6
+        min_h = 0.3
+
+        # Image centre:
+        w = self.img_i_1.shape[1]
+        h = self.img_i_1.shape[0]
+        c = np.array([w/2, h/2])
+
+        # Extract rotation matrices and translation vectors
+        R_cw = current_pose[:, :3]
+        R_c1w = previous_pose[:, :3]
+        c_t_cw = current_pose[:, 3]
+        c1_t_c1w = previous_pose[:, 3]
+
+        # The rotation matrix form C-1 to C:
+        R_cc1 = R_cw @ R_c1w.T
+
+        # The vector from C-1 to W in C coordinates:
+        c_t_c1w = R_cc1 @ c1_t_c1w
+
+        # The baseline vector b in the C frame:
+        c_b = c_t_c1w - c_t_cw
+
+        # Find the vector from C-1 to C in normalised C coordinates
+        cn_b = c_b / c_b[2]
+
+        # The sampling square around the epipole: all in normalised coord
+        left_extreme = w_factor * cn_b[0] if w_factor * cn_b[0] < -min_w/2 else -min_w/2
+        right_extreme = w_factor * cn_b[0] if w_factor * cn_b[0] > min_w else min_w/2
+        lower_extreme = h_factor * cn_b[1] if h_factor * cn_b[1] < -min_h/2 else -min_h/2
+        upper_extreme = h_factor * cn_b[1] if h_factor * cn_b[1] > min_h/2 else min_h/2
+
+        extremes = np.array([[left_extreme,  right_extreme],
+                             [lower_extreme, upper_extreme],
+                             [1,             1,           ]])
+        
+        # Convert to image coordinates
+        extremes_uv_unbounded = self.K @ extremes
+
+        # Bound the image coordinates to the imge resolution
+        extremes_uv = np.array([[max(0, np.min(extremes_uv_unbounded[0])),
+                                 min(w, np.max(extremes_uv_unbounded[0]))],
+                                [max(0, np.min(extremes_uv_unbounded[1])),
+                                 min(h, np.max(extremes_uv_unbounded[1]))]])
+        
+        return np.round(extremes_uv).astype(int)
+    
+     
+    def get_sampling_rect_mode_based(self, previous_pose: np.array, current_pose: np.array):
+
+        # Image centre:
+        w = self.img_i_1.shape[1]
+        h = self.img_i_1.shape[0]
+        c = np.array([w/2, h/2])
+
+        # Parameters
+        min_pix_w = 0.3 * w
+        min_pix_h = 0.3 * h
+
+        # Extract rotation matrices and translation vectors
+        R_cw = current_pose[:, :3]
+        R_c1w = previous_pose[:, :3]
+        c_t_cw = current_pose[:, 3]
+        c1_t_c1w = previous_pose[:, 3]
+
+        # The rotation matrix form C-1 to C:
+        R_cc1 = R_cw @ R_c1w.T
+
+        # The vector from C-1 to W in C coordinates:
+        c_t_c1w = R_cc1 @ c1_t_c1w
+
+        # The baseline vector b in the C frame:
+        c_b = c_t_c1w - c_t_cw
+
+        # Find the vector from C-1 to C in normalised C coordinates
+        cn_b = c_b / c_b[2]
+
+        # Rodrigues rotation vector
+        rot_vec = cv2.Rodrigues(R_cc1)[0]
+
+        self.rot_vec.append(rot_vec)
+
+        # Determine whether to switch the turning mode
+        if len(self.rot_vec) >= 3:
+            if all([self.rot_vec[-1][1] >= 0.03,
+                   self.rot_vec[-2][1] >= 0.03]):
+                self.turning_mode = "left"
+                self.angle_threshold = 0.0035
+            elif all([self.rot_vec[-1][1] <= -0.03,
+                     self.rot_vec[-2][1] <= -0.03]):
+                self.turning_mode = "right"
+                self.angle_threshold = 0.0035
+            else:
+                self.turning_mode = None
+                self.angle_threshold = 0.01
+
+        # Sampling square based on turning mode
+        if self.turning_mode is None:
+            left_extreme = c[0] - min_pix_w
+            right_extreme = c[0] + min_pix_w
+            lower_extreme = c[1] - min_pix_h
+            upper_extreme = c[1] + min_pix_h
+
+        elif self.turning_mode == "left":
+            left_extreme = 0
+            right_extreme = c[0] + min_pix_w /2
+            lower_extreme = c[1] - min_pix_h
+            upper_extreme = c[1] + min_pix_h
+
+        elif self.turning_mode == "right":
+            left_extreme = c[0] - min_pix_w / 2
+            right_extreme = w
+            lower_extreme = c[1] - min_pix_h
+            upper_extreme = c[1] + min_pix_h
+
+        extremes = np.array([[left_extreme, right_extreme],
+                             [lower_extreme, upper_extreme]])
+        
+        return extremes.astype(int)
