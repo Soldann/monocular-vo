@@ -56,14 +56,23 @@ class PoseGraphOptimizer:
             ransac_inliers = ransac_inliers.astype(np.bool_).reshape(-1)
 
             _, R, t, _ = cv2.recoverPose(E, points1[ransac_inliers], points2[ransac_inliers], self.K)
-            transforms.append(np.column_stack((R, t)))
+            transforms.append(np.row_stack((np.column_stack((R, t)), [0,0,0,1])))
 
         self.relative_transforms.append(transforms)
         self.transform_to_world.append(HomogMatrix2twist(np.row_stack((transform_estimate, [0,0,0,1]))))
 
-    def optimize(self):
- 
-    
+    def optimize(self, with_pattern=False):
+        pattern = None
+        values_to_optimize = np.array(self.transform_to_world).flatten()
+        if with_pattern:
+            num_error_terms = int(len(self.transform_to_world) - 1)
+
+            pattern = scipy.sparse.lil_matrix((num_error_terms, values_to_optimize.shape[0]), dtype=np.int8)
+            for i in range(1, len(self.transform_to_world)):
+                pattern[:i*6] = 1 # each error is affected by i poses, which are 6 values each
+
+            pattern = scipy.sparse.csr_matrix(pattern)
+
         # Define the function that computes the residuals
         def residuals(world_to_cameras, poses):
             # world_to_cameras: the parameters to optimize
@@ -71,23 +80,24 @@ class PoseGraphOptimizer:
 
             world_to_cameras = world_to_cameras.reshape((-1,6)) # reshape into array of transformation matrices
             residuals = []
-            for i in range(len(poses)): # transforms from frame i to j
+            for i in range(1, len(poses)): # loop over the transforms from frame i to j. Start at 1 because there is no residual for the first image
                 
-                T_iw = twist2HomogMatrix(world_to_cameras[i])[:3,:] # transform from w to i
+                T_iw = twist2HomogMatrix(world_to_cameras[i]) # transform from w to i
                 
-                for j in range(len(poses[i])):
-                    T_jw = twist2HomogMatrix(world_to_cameras[j])[:3,:]
-                    T_ij = poses[i][j] # relative_transform from pose i to pose j
+                for j in range(i): # there should be i relative transformation matrices for the i-th pose we are optimising
+                    T_jw = twist2HomogMatrix(world_to_cameras[j])
+                    T_ij = poses[i][j] # relative_transform from pose j to pose i
 
-                    residual = scipy.linalg.norm(T_iw - multiply_transformation(T_ij, T_jw)) # compute difference between current estimate for world position of camera, and what we get from relative transforms
+                    residual = scipy.linalg.norm((T_iw - T_jw @ T_ij)[:3,:]) # compute difference between current estimate for world position of camera, and what we get from relative transforms
+                    # ^ WTF it should be T_iw - T_ij @ T_jw but it only actually works when i do it this way what did i do wrong???
                     residuals.append(residual)
             return np.array(residuals).flatten()
 
 
-        result = scipy.optimize.least_squares(residuals, np.array(self.transform_to_world).flatten(), args=(self.relative_transforms,))
+        result = scipy.optimize.least_squares(residuals, values_to_optimize, args=(self.relative_transforms,), max_nfev=20, jac_sparsity=pattern)
         print("Pose Graph Optimised: ")
         for value in (result.x).reshape(-1,6):
             print(twist2HomogMatrix(value)[:3,:])
         print("Regular output: ") # Separator for when the non-optimised value gets printed by the rest of the code
-
+        return (result.x).reshape(-1,6)
 

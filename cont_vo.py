@@ -491,7 +491,9 @@ class VO:
 
         # Step 7.5? Pose graph optimisation
         self.pose_optimiser.add_image(img_i,self.T_Ci_1__w.copy())
-        self.pose_optimiser.optimize()
+        optimised_poses = self.pose_optimiser.optimize()
+
+        self.T_Ci_1__w = twist2HomogMatrix(optimised_poses[-1])[:3,:]
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
