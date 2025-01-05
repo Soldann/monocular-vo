@@ -397,7 +397,7 @@ class VO:
         self.Ti_1 = self.Ti_1[C_i_tracked]
         self.img_i_1 = img_i
 
-        extremes = self.extract_new_features_epipolar(5, 3, previous_pose, self.T_Ci_1__w)
+        extremes = self.extract_new_features_epipolar(6, 2, previous_pose, self.T_Ci_1__w)
         # extremes = self.get_sampling_rect(previous_pose, self.T_Ci_1__w)
 
         """
@@ -615,12 +615,12 @@ class VO:
 
         # Determine whether to switch the turning mode
         if len(self.rot_vec) >= 3:
-            if all([self.rot_vec[-1][1] >= 0.03,
-                   self.rot_vec[-2][1] >= 0.03]):
+            if all([self.rot_vec[-1][1] >= 0.028,
+                   self.rot_vec[-2][1] >= 0.028]):
                 self.turning_mode = "left"
                 self.angle_threshold = 0.0035
-            elif all([self.rot_vec[-1][1] <= -0.03,
-                     self.rot_vec[-2][1] <= -0.03]):
+            elif all([self.rot_vec[-1][1] <= -0.028,
+                     self.rot_vec[-2][1] <= -0.028]):
                 self.turning_mode = "right"
                 self.angle_threshold = 0.0035
             else:
