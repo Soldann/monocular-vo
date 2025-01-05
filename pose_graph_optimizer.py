@@ -62,11 +62,11 @@ class PoseGraphOptimizer:
         self.relative_transforms.append(transforms)
         self.transform_to_world.append(HomogMatrix2twist(np.row_stack((transform_estimate, [0,0,0,1]))))
 
-    def optimize(self, with_pattern=False):
+    def optimize(self, with_pattern=True):
         pattern = None
         values_to_optimize = np.array(self.transform_to_world).flatten()
         if with_pattern:
-            num_error_terms = int(len(self.transform_to_world) - 1)
+            num_error_terms = int(((len(self.relative_transforms) - 1) * len(self.relative_transforms))/2) # equals sum of range 1 to (len(self.relative_transforms) - 1)
 
             pattern = scipy.sparse.lil_matrix((num_error_terms, values_to_optimize.shape[0]), dtype=np.int8)
             for i in range(1, len(self.transform_to_world)):
