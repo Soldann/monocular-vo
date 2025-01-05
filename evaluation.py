@@ -301,7 +301,7 @@ class TrajectoryEval:
         return RMSE
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="malaga", first_frame=3)
+    te = TrajectoryEval(dataset_name="kitti", first_frame=2)
     te.similarity_transform_3d()
     print(te.absolue_trajectory_error())
     te.draw_trajectory(gt=True)
