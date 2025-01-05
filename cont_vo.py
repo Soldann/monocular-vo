@@ -587,8 +587,13 @@ class VO:
         c = np.array([w/2, h/2])
 
         # Parameters
-        min_pix_w = 0.3 * w
-        min_pix_h = 0.3 * h
+        if self.dl.dataset_str == "kitti":
+            min_pix_w = 0.3 * w
+            min_pix_h = 0.35 * h
+        if self.dl.dataset_str == "malaga":
+            min_pix_w = 0.35 * w
+            min_pix_h = 0.25 * h
+            c[1] += 80
 
         # Extract rotation matrices and translation vectors
         R_cw = current_pose[:, :3]
