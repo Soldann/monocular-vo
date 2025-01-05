@@ -17,6 +17,7 @@ class PoseGraphOptimizer:
         self.relative_transforms = deque(maxlen=self.sliding_window_size) # X by Y by 12, where relative_transforms[X,Y,:] is T_XY (transform from Y to X)
         # Note: Relative transforms could be size self.sliding_window_size - 1, as we don't need relative transforms to the last tracked frame. But for ease of indexing we store it anyways
         self.transform_to_world = deque(maxlen=self.sliding_window_size) # N x 12
+        self.sift_features = deque(maxlen=self.sliding_window_size)
 
 
     def add_image(self, new_image, transform_estimate):
@@ -31,14 +32,16 @@ class PoseGraphOptimizer:
         self.images.append(new_image)
 
         transforms = []
+        sift = cv2.SIFT_create()
+        kp2, des2 = sift.detectAndCompute(new_image, None)
+        self.sift_features.append((kp2, des2))
+
         for i in range(len(self.images) - 1):
             image = self.images[i]
             ## Compute transform using DLT from all images in window to new image (reuse sift code lol)
 
             # Feature extraction
-            sift = cv2.SIFT_create()
-            kp1, des1 = sift.detectAndCompute(image, None)
-            kp2, des2 = sift.detectAndCompute(new_image, None)
+            kp1, des1 = self.sift_features[i]
 
             bf = cv2.BFMatcher()
             matches = bf.knnMatch(des1, des2, k=2)
