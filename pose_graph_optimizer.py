@@ -15,6 +15,7 @@ class PoseGraphOptimizer:
         self.sliding_window_size = sliding_window_size
         self.images = deque(maxlen=sliding_window_size)
         self.relative_transforms = deque(maxlen=self.sliding_window_size) # X by Y by 12, where relative_transforms[X,Y,:] is T_XY (transform from Y to X)
+        # Note: Relative transforms could be size self.sliding_window_size - 1, as we don't need relative transforms to the last tracked frame. But for ease of indexing we store it anyways
         self.transform_to_world = deque(maxlen=self.sliding_window_size) # N x 12
 
 
