@@ -6,6 +6,7 @@ from enum import Enum
 from typing import List, Optional
 from utils import *
 import time
+from pose_graph_optimizer import PoseGraphOptimizer
 
 class VO:
 
@@ -65,6 +66,9 @@ class VO:
         self.angle_threshold = 0.01
 
         self.sift_keypoint_similarity_threshold = 10
+
+        self.pose_optimiser = PoseGraphOptimizer(self.K, self.T_Ci_1__w.copy() )
+        self.pose_optimiser.add_image(self.img_i_1.copy(), self.T_Ci_1__w.copy()) # add if not repeating the second bootstrap image
 
     def run_KLT(self, img_i_1, img_i, points_to_track, name_of_feature="features", debug=False):
         """
@@ -513,6 +517,18 @@ class VO:
 
         SIFT_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t
 
+
+        # Step 7.5? Pose graph optimisation
+        self.pose_optimiser.add_image(img_i,self.T_Ci_1__w.copy())
+
+        Optimizer_keypoints_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t
+
+        optimised_poses = self.pose_optimiser.optimize()
+
+        self.T_Ci_1__w = twist2HomogMatrix(optimised_poses[-1])[:3,:]
+
+        Optimizer_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t - Optimizer_keypoints_t
+
         total_time =  time.time() - start_t
 
         # print all times
@@ -522,11 +538,9 @@ class VO:
         print("Angle_t:", Angle_t)
         print("Triangulation_t:", Triangulation_t)
         print("SIFT_t:", SIFT_t)
+        print("Optimizer_keypoints_t:", Optimizer_keypoints_t)
+        print("Optimizer_t:", Optimizer_t)
         print("total_time:", total_time)
-
-
-
-
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already

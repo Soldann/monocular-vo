@@ -27,9 +27,9 @@ class VoRunner():
 
 
     def process_frames(self):
-        index = self.b.init_frames[1]
+        index = self.b.init_frames[1] + 1
 
-        for image in self.dl[self.b.init_frames[1]:]:
+        for image in self.dl[self.b.init_frames[1] + 1:]:
             if self.stop_event.is_set():
                 break
             
