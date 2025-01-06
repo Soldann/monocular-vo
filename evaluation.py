@@ -13,6 +13,7 @@ from pathlib import Path
 import pickle
 import numpy as np
 from cv2 import Rodrigues
+from initialise_vo import DataLoader
 
 from utils import inverse_transformation, drawCamera
 
@@ -577,7 +578,8 @@ class TrajectoryEval:
 if __name__ == "__main__":
     
     # Set the name and first frame. Make sure the trajectory file is in the directory
-    te = TrajectoryEval(dataset_name="kitti", first_frame=2)
+    dl = DataLoader("kitti", preload=False)
+    te = TrajectoryEval(dataset_name=dl.dataset_str, first_frame=dl.init_frames[1])
 
     # To show the relative error:
 

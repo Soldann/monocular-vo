@@ -11,7 +11,7 @@ from mpl_toolkits.mplot3d import proj3d
 
 class DataLoader():
 
-    def __init__(self, dataset: str, malaga_rect=True):
+    def __init__(self, dataset: str, malaga_rect=True, preload=True):
         """
         Retrieves the images and camera intrinsics for easy switching between
         different datasets.
@@ -169,12 +169,19 @@ class DataLoader():
         else:  # The input is not in ("kitti", "parking", "malaga"):
             raise ValueError("Did not specify one of 'kitti', 'parking',"
                              +" 'malaga', 'own_1', or 'own_2'.")
-        print("Preloading dataset images...", end="", flush=True)
+        
+        if preload:
+            self.load()
+
+
+    def load(self):
+        print("Loading dataset images...", end="", flush=True)
 
         for frame in self.all_im_paths:
             self.images.append(cv2.imread(str(frame), cv2.IMREAD_GRAYSCALE))
 
         print("done.")
+
 
     def __getitem__(self, index):
 
@@ -186,7 +193,7 @@ class DataLoader():
         else:
             img = self.images[index]
             return img
-1
+
 
 class Bootstrap():
 
