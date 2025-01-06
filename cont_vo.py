@@ -310,8 +310,6 @@ class VO:
             p_in_camera = p_in_camera[:3] / p_in_camera[3]  # Normalize the point
 
             if p_in_camera[2] < 0:
-                pass
-                #triangulated_point_w = triangulated_point_w * -1
                 triangulated_point_w = triangulated_point_w * 0
                 #print("behind???")
 

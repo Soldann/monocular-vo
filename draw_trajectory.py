@@ -149,10 +149,9 @@ class DrawTrajectory():
 
         ### ------- PROCESS DATA ------- ###
         
-
-
+        homog_x = np.hstack([x, np.ones((x.shape[0], 1))])
         # Computing the depth component
-        z_c = (x @ c_R_cw.T)[:, 2]  # compute z_c
+        z_c = (homog_x @ t.T)[:, 2]  # compute z_c
 
         ### ------- UPDATE FIGURE DATA ------- ###
 
