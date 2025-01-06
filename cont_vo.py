@@ -472,7 +472,7 @@ class VO:
             new_filter_unfiltered[filtered_indices] = angle_mask
             C_i_tracked[new_filter_unfiltered] = False  # Update filtered array with new mask
 
-            # Step 7: Update state vectors
+            # Step 6: Update state vectors
             # how many true values in C_i_tracked?
             num_true = np.sum(C_i_tracked)
             print(f"Number of true values in C_i_tracked: {num_true}")
@@ -488,8 +488,7 @@ class VO:
         Triangulation_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t
 
 
-        # Step 6: Run SIFT if C is too small to add new candidates
-        # TODO: Implement this step
+        # Step 7: Run feature detection if C is too small to add new candidates. May be SIFT or Shi-Tomasi
         h, w = img_i.shape
         total = len(self.Ci_1)
         left_of_screen = np.sum(self.Ci_1[:, 0] < w*3/5)
@@ -505,7 +504,7 @@ class VO:
         SIFT_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t
 
 
-        # Step 7.5? Pose graph optimisation
+        # Step 8 Pose graph optimisation
         Optimizer_keypoints_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t
         if self.hyperparams.do_optimize:
             self.pose_optimiser.add_image(img_i,self.T_Ci_1__w.copy())
@@ -529,7 +528,7 @@ class VO:
         print("Optimizer_t:", Optimizer_t)
         print("total_time:", total_time)
 
-        # Step 8: Return pose, P, and X. Returning the i-1 version since the
+        # Step 9: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
         return optimised_poses, self.Pi_1, self.Xi_1, self.Ci_1
 

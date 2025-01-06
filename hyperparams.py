@@ -4,17 +4,34 @@ class Hyperparameters:
 
         parking = HyperparameterInstance()
         kitti = HyperparameterInstance()
-        kitti.harris_threshold = 0.01
-        kitti.harris_count = 2500
-        kitti.max_kp = 1000
-        kitti.block_radius = 15
+        kitti.max_kp = 2500
+        kitti.block_radius = 13
+
+        # malaga optimize / not optimize
         malaga = HyperparameterInstance()
         malaga.block_radius = 60
         malaga.max_kp = 1250
         malaga.do_sift = True
         malaga.harris_count = 50
         malaga.harris_threshold = 0.1
-        malaga.do_optimize = True
+        malaga.do_optimize = False
+
+        # Kitti sparse
+        # kitti = HyperparameterInstance()
+        # kitti.harris_threshold = 0.1
+        # kitti.harris_count = 600
+        # kitti.max_kp = 500
+        # kitti.block_radius = 40
+
+        # Kitti optimize
+        # kitti = HyperparameterInstance()
+        # kitti.harris_threshold = 0.01
+        # kitti.harris_count = 2500
+        # kitti.do_sift = False
+        # kitti.max_kp = 700
+        # kitti.block_radius = 20
+        # kitti.w_split = 1
+        # kitti.do_optimize = True
 
         own1 = HyperparameterInstance()
 
@@ -64,5 +81,6 @@ class HyperparameterInstance:
         print("ransac1_bincount: ", self.ransac1_bincount)
         print("angle_threshold: ", self.angle_threshold)
         print("ransac_acc: ", self.ransac_acc)
-    
+        print("max_kp: ", self.max_kp)
+        print("block_radius: ", self.block_radius)
 

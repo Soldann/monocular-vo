@@ -13,6 +13,7 @@ from pathlib import Path
 import pickle
 import numpy as np
 from cv2 import Rodrigues
+from initialise_vo import DataLoader
 
 from utils import inverse_transformation, drawCamera
 
@@ -347,7 +348,7 @@ class TrajectoryEval:
             R_align = self.gt_T_wc_list[pos][:, :3] @ self.T_wc_list[pos][:, :3].T
 
             # Compute the rotation error at the last frame of the subtrajectory
-            # First apply alignemtn to the rotation estimation of the last frame
+            # First apply alignment to the rotation estimation of the last frame
             R_last_aligned = R_align @ self.T_wc_list[next_pos][:, :3] 
             R_err = R_last_aligned @ self.gt_T_wc_list[next_pos][:, :3].T
 
@@ -536,7 +537,8 @@ class TrajectoryEval:
 if __name__ == "__main__":
     
     # Set the name and first frame. Make sure the trajectory file is in the directory
-    te = TrajectoryEval(dataset_name="kitti", first_frame=3)
+    dl = DataLoader("kitti", preload=False)
+    te = TrajectoryEval(dataset_name=dl.dataset_str, first_frame=dl.init_frames[1])
 
     # To show the relative error:
 
