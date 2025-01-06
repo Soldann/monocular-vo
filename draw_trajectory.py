@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 import cv2
-from arrow_3d import Arrow3D
+from matplotlib.patches import FancyArrow
 from utils import drawCamera
 
 class DrawTrajectory():
@@ -40,7 +40,6 @@ class DrawTrajectory():
         c_t_cw = b.transformation_matrix[:, -1]
         w_t_wc = -1 * c_R_cw.T @ c_t_cw
         self.w_t_wc_x = [w_t_wc[0]]
-        self.w_t_wc_y = [w_t_wc[1]]
         self.w_t_wc_z = [w_t_wc[2]]
 
         # Computing the depth component
@@ -66,9 +65,7 @@ class DrawTrajectory():
         )
         self.fig.canvas.mpl_connect('close_event', on_close)
         self.u = axs["u"]
-        self.l = self.fig.add_subplot(2, 2, 3, projection="3d")
-
-        #self.l = axs["l"]
+        self.l = axs["l"]
         self.r = axs["r"]
         #self.m = axs["m"]
         self.fig.suptitle(f"Image i = {self.frame}")
@@ -98,14 +95,12 @@ class DrawTrajectory():
         self.r.set_title("Landmarks $P$ in world frame")
 
         # Left: xz camera position
-        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_y, self.w_t_wc_z)[0]
+        self.l_pos = self.l.plot(self.w_t_wc_x, self.w_t_wc_z)[0]
         drawCamera(self.l, w_t_wc, c_R_cw)
         self.l.set_xlabel("$X_w$ - SFM units")
         self.l.set_ylabel("$Z_w$ - SFM units")
-        self.l.set_zlabel("$Y_w$ - SFM units")
         self.l.set_xlim(5, 5)
         self.l.set_ylim(5, 5)
-        self.l.set_zlim(5, 5)
         self.l.autoscale(False)
 
 
@@ -149,7 +144,6 @@ class DrawTrajectory():
             w_t_wc = -1 * c_R_cw.T @ c_t_cw
             self.w_t_wc_x.append(w_t_wc[0])
             self.w_t_wc_z.append(w_t_wc[2])
-            self.w_t_wc_y.append(w_t_wc[1])
 
         t = ts[-1]
 
@@ -176,10 +170,9 @@ class DrawTrajectory():
         self.r_prev_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
 
         # Left plot
-        self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_y)
-        self.l_pos.set_3d_properties(self.w_t_wc_z)
+        self.l_pos.set_data(self.w_t_wc_x, self.w_t_wc_z)
         for artist in self.l.get_children():
-            if isinstance(artist, Arrow3D):  # Check if it's a Line2D object
+            if isinstance(artist, FancyArrow):  # Check if it's a Line2D object
                 artist.remove()
 
 
@@ -189,17 +182,14 @@ class DrawTrajectory():
         # Compute the limits for the plot; same scale for both axes
         l_xmin, l_xmax = min(self.w_t_wc_x) - 1, max(self.w_t_wc_x) + 1
         l_zmin, l_zmax = min(self.w_t_wc_z) - 1, max(self.w_t_wc_z) + 1
-        l_ymin, l_ymax = min(self.w_t_wc_y) - 1, max(self.w_t_wc_y) + 1
 
-        max_range = max(l_xmax - l_xmin, l_zmax - l_zmin, l_ymax - l_ymin)
+        max_range = max(l_xmax - l_xmin, l_zmax - l_zmin)*7.5/5
         mid_x = 0.5 * (l_xmin + l_xmax)
         mid_z = 0.5 * (l_zmin + l_zmax)
-        mid_y = 0.5 * (l_ymin + l_ymax)
 
         self.l.set_xlim(mid_x - 0.5 * max_range, mid_x + 0.5 * max_range)
-        self.l.set_ylim(mid_y - 0.5 * max_range, mid_y + 0.5 * max_range)
-        self.l.set_zlim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
-        drawCamera(self.l, w_t_wc, c_R_cw.T, length_scale=max_range/5)
+        self.l.set_ylim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
+        drawCamera(self.l, w_t_wc, c_R_cw.T, length_scale=max_range/8)
 
         # Right plot
         # Making sure the landmark positions are visible:
