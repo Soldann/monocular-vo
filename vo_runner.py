@@ -36,9 +36,13 @@ class VoRunner():
             if image is None:
                 break
 
-            p_new, pi, xi, ci = self.vo.process_frame(image, debug=[])
+            optimised_poses, pi, xi, ci = self.vo.process_frame(image, debug=[])
+            p_new = optimised_poses[-1]
+            updated_poses = optimised_poses[:-1]
+            if len(self.poses) == len(updated_poses):
+                self.poses[-len(updated_poses):] = updated_poses
             self.poses.append(p_new)
-            self.data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
+            self.data_queue.put((updated_poses, p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
 
             index += 1
         
@@ -48,9 +52,12 @@ class VoRunner():
         
         while self.processing and not self.stop_event.is_set():
             p_news = []
-            p_new, pi, xi, ci, image, idx = None, None, None, None, None, None
+            updated_poses, p_new, pi, xi, ci, image, idx = None, None, None, None, None, None, None
             while not self.data_queue.empty():
-                p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval, block=False)  # Wait for new data
+                updated_poses, p_new, pi, xi, ci, image, idx = self.data_queue.get(timeout=self.interval, block=False)  # Wait for new data
+                if len(p_news) == len(updated_poses):
+                    p_news[-len(updated_poses):] = updated_poses
+                p_news[-len(updated_poses):] = updated_poses
                 p_news.append(p_new)
             
             if len(p_news) > 0:
@@ -59,9 +66,11 @@ class VoRunner():
 
         # Final update
         p_news = []
-        p_new, pi, xi, ci, image, idx = None, None, None, None, None, None
+        updated_poses, p_new, pi, xi, ci, image, idx = None, None, None, None, None, None, None
         while not self.data_queue.empty():
-            p_new, pi, xi, ci, image, idx = self.data_queue.get(block=False)  # Wait for new data
+            updated_poses, p_new, pi, xi, ci, image, idx = self.data_queue.get(block=False)  # Wait for new data
+            if len(p_news) == len(updated_poses):
+                p_news[-len(updated_poses):] = updated_poses
             p_news.append(p_new)
         if len(p_news) > 0:
             self.visualizer.update_data(p_news, pi, xi, ci, image, idx)

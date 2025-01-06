@@ -524,8 +524,8 @@ class VO:
         Optimizer_keypoints_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t
 
         optimised_poses = self.pose_optimiser.optimize()
-
-        self.T_Ci_1__w = twist2HomogMatrix(optimised_poses[-1])[:3,:]
+        optimised_poses = [twist2HomogMatrix(pose)[:3,:] for pose in optimised_poses]
+        self.T_Ci_1__w = optimised_poses[-1]
 
         Optimizer_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t - Optimizer_keypoints_t
 
@@ -544,5 +544,5 @@ class VO:
 
         # Step 8: Return pose, P, and X. Returning the i-1 version since the
         # sets were updated already
-        return self.T_Ci_1__w, self.Pi_1, self.Xi_1, self.Ci_1
+        return optimised_poses, self.Pi_1, self.Xi_1, self.Ci_1
 
