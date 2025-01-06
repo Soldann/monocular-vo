@@ -16,7 +16,21 @@ from cv2 import Rodrigues
 from initialise_vo import DataLoader
 
 from utils import inverse_transformation, drawCamera
+USER_DS_QUESTION = "Which dataset results would you like to evaluate? Options are: 'parking' (1), 'kitti' (2), 'malaga' (3). Enter your choice as a number: "
 
+
+def get_ds_name_from_user():
+    response = input(USER_DS_QUESTION)
+    switcher = {
+        '1': "parking",
+        '2': "kitti",
+        '3': "malaga",
+    }
+    if response in switcher:
+        return switcher.get(response)
+    else:
+        print("Invalid, defaulting to 'kitti'")
+        return "kitti"
 
 class TrajectoryEval:
 
@@ -537,7 +551,7 @@ class TrajectoryEval:
 if __name__ == "__main__":
     
     # Set the name and first frame. Make sure the trajectory file is in the directory
-    dl = DataLoader("kitti", preload=False)
+    dl = DataLoader(get_ds_name_from_user(), preload=False)
     te = TrajectoryEval(dataset_name=dl.dataset_str, first_frame=dl.init_frames[1])
 
     # To show the relative error:
@@ -550,5 +564,5 @@ if __name__ == "__main__":
 
     # To compute the absolute error and show the resulting plot:
     te.similarity_transform_3d()
-    te.draw_trajectory(gt=True)
     print(f"Root mean squared position ATE: {te.absolue_trajectory_error()}")
+    te.draw_trajectory(gt=True)
