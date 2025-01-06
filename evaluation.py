@@ -1,5 +1,11 @@
 """
 Module for trajectory evaluation
+
+Note: 
+- The self-produced datasets do not have a ground truth.
+- The Malaga dataset does not provide orientation ground truths. The relative
+  error requires the orientation to align the subtrajectories at their starting
+  states. Hence, the relative error is not implemented for Malaga.
 """
 
 from matplotlib import pyplot as plt
@@ -159,7 +165,7 @@ class TrajectoryEval:
         ax.set_xlabel("$X_w$")
         ax.set_ylabel("$Y_w$")
         ax.set_zlabel("$Z_w$")
-        ax.set_title("VO Trajectory Positions")
+        ax.set_title("Absolute Trajectory Error")
 
         if gt:  # If the ground truth should be plotted as well
             gt_w_t_wc__x = self.gt_T_wc_array[0::3, 3]
@@ -299,9 +305,241 @@ class TrajectoryEval:
                                - self.T_wc_array[:, 3])**2) / self.n_poses)
         
         return RMSE
+    
+    def _get_relative_error(self, trajectory_length: float):
+        """
+        The relative error is composed of two separable errors: roation and position.
+        Scale drift can also be visualised by the change of alignment scales across
+        the trajectory
+
+        ### Parameters
+        1. trajectory_length : float
+            - Trajectory length in meters
+
+        ### Returns
+        1. position error
+        2. rotation error
+        3. alignment scales
+        4. split and aligned trajectories
+        """
+
+        split_pos = self.re_get_split_pos(trajectory_length)
+        split_trajec = np.zeros([split_pos[-1], 3])
+        rot_err = np.zeros([len(split_pos) - 1, 3])
+        scales = np.zeros(len(split_pos) - 1)
+        pos_err = np.zeros(len(split_pos) - 1)
+
+        for i in range(len(split_pos) - 1):
+
+            pos = split_pos[i]
+            next_pos = split_pos[i + 1]
+
+            # ---------- COMPUTE ROTATION ERROR ---------- #
+
+            # Difference of rotation between the poses
+            R_align = self.gt_T_wc_list[pos][:, :3] @ self.T_wc_list[pos][:, :3].T
+
+            # Compute the rotation error at the last frame of the subtrajectory
+            # First apply alignemtn to the rotation estimation of the last frame
+            R_last_aligned = R_align @ self.T_wc_list[next_pos][:, :3] 
+            R_err = R_last_aligned @ self.gt_T_wc_list[next_pos][:, :3].T
+
+            # Convert the rotation error to vector representation and save
+            radian_error = Rodrigues(R_err)[0].flatten()
+            rot_err[i] = radian_error * 180 / np.pi
+
+            # ---------- ALIGN THE SUBTRAJECTORIES ---------- #
+
+            # Estimated translations of the subtrajectory as a (3 x n)
+            t_est = self.T_wc_array[(3 * pos):(3 * next_pos), 3]
+            t_est = t_est.reshape(3, -1, order="F")
+
+            # Subtracting the first element: rotation around the first position
+            t_est_rel = t_est - np.c_[t_est[:, 0]]
+            t_est_rot = R_align @ t_est_rel
+
+            # Adapting the scale: Minimise the distance between the aligned vector
+            # and the ground truth
+            gt_end_vec = self.gt_T_wc_list[next_pos][:, 3] - self.gt_T_wc_list[pos][:, 3]
+            t_end_vec = t_est_rot[:, -1]
+            scale = np.dot(t_end_vec, gt_end_vec) / np.sum(t_end_vec**2)
+            t_est_rot *= scale
+            scales[i] = scale
+
+            # Adding the translation vec of the GT's first pose:
+            t_aligned = t_est_rot + np.c_[self.gt_T_wc_list[pos][:, 3]]
+
+            # Compute the position error after rescaling
+            pos_err[i] = np.sqrt(np.sum((t_aligned[:, -1]
+                                         - self.gt_T_wc_list[next_pos][:, 3])**2))
+
+            # Save the split trajectories for visualisation
+            split_trajec[pos:next_pos] = t_aligned.T
+
+        return pos_err, rot_err, scales, split_trajec, split_pos
+
+
+    def relative_error(self, trajec_lenghts=(7, 23, 31, 39, 100)):
+        """
+        Compute and visualise the relative error measures for several subtrajectory 
+        lengths.
+        Note: since Malaga does not provide ground-truth orientations, the relative
+        error is not impoemented for this dataset.
+
+        ### Parameters
+        1. trajec_lengths: tuple
+            - The subtrajectory lengths in meters for which the relative error and its
+            statistics should be computed. The last of these can be visualised in a 3D
+            plot. The first of these provides the information for the scale-drift plot
+        """
+
+        n_lengths = len(trajec_lenghts)
+
+        pos_errs = []
+        rot_errs = []
+        abs_rot_errs = []
+        scale_drifts = []
+        split_trajecs = []
+        split_pos_s = []
+
+        for i in range(n_lengths):
+
+            for_length_i = self._get_relative_error(trajec_lenghts[i])
+            pos_err, rot_err, scale_drift, split_trajec, split_pos = for_length_i
+            pos_errs.append(pos_err)
+            rot_errs.append(rot_err)
+            scale_drifts.append(scale_drift)
+            split_trajecs.append(split_trajec)
+            split_pos_s.append(split_pos)
+
+            abs_rot_err = np.sqrt(np.sum(rot_err**2, axis=1))
+            abs_rot_errs.append(abs_rot_err)
+
+        # ---------- STATISTICS PLOT ---------- #
+
+        mosaic_struc = np.array([["box_pos"],
+                                 ["box_rot"],
+                                 ["scale"]])
+
+        fig1, axs = plt.subplot_mosaic(mosaic_struc, layout="constrained",
+                                       figsize=(6, 7))
+        
+        axs["box_pos"].boxplot(pos_errs)
+        axs["box_pos"].set_title("Translation error")
+        axs["box_pos"].set_xlabel("Subtrajectory length [m]")
+        axs["box_pos"].set_ylabel("Translation error [m]")
+        axs["box_pos"].set_xticklabels([str(i) for i in trajec_lenghts])
+
+        axs["box_rot"].boxplot(abs_rot_errs)
+        axs["box_rot"].set_title("Rotation error")
+        axs["box_rot"].set_xlabel("Subtrajectory length [m]")
+        axs["box_rot"].set_ylabel("Rotation error [deg]")
+        axs["box_rot"].set_xticklabels([str(i) for i in trajec_lenghts])
+
+        dist_travelled = [trajec_lenghts[0] * i for i in range(len(scale_drifts[0]))]
+
+        axs["scale"].plot(dist_travelled, scale_drifts[0])
+        axs["scale"].set_title("Scale Drift")
+        axs["scale"].set_xlabel("Lenght along the total trajectory [m]")
+        axs["scale"].set_ylabel("Scaling factor wrt. ground truth")
+        axs["scale"].grid(True)
+
+
+        # ---------- PLOT 3D ---------- #
+
+        w_t_wc__x = split_trajecs[-1][:, 0]
+        w_t_wc__y = split_trajecs[-1][:, 1]
+        w_t_wc__z = split_trajecs[-1][:, 2]
+
+        gt_w_t_wc__x = self.gt_T_wc_array[0::3, 3]
+        gt_w_t_wc__y = self.gt_T_wc_array[1::3, 3]
+        gt_w_t_wc__z = self.gt_T_wc_array[2::3, 3]
+
+        fig1 = plt.figure()
+        ax = fig1.add_subplot(projection="3d")
+        ax.plot(gt_w_t_wc__x, gt_w_t_wc__y, gt_w_t_wc__z, color="r")
+        for i in range(len(split_pos) - 1):
+            ax.plot(w_t_wc__x[split_pos_s[-1][i]:split_pos_s[-1][i + 1]], 
+                    w_t_wc__y[split_pos_s[-1][i]:split_pos_s[-1][i + 1]], 
+                    w_t_wc__z[split_pos_s[-1][i]:split_pos_s[-1][i + 1]], color="b")
+            ax.plot(w_t_wc__x[split_pos_s[-1][i]], 
+                    w_t_wc__y[split_pos_s[-1][i]], 
+                    w_t_wc__z[split_pos_s[-1][i]], "go", markersize=3)
+        ax.set_xlabel("$X_w$")
+        ax.set_ylabel("$Y_w$")
+        ax.set_zlabel("$Z_w$")
+        ax.set_title("Relative Trajectory Error")
+        ax.legend(["Ground truth", "VO estimate", "Subtrajectory"])
+
+        # Compute the limits for the plot; same scale for both axes
+        xmin = np.min(np.r_[w_t_wc__x, gt_w_t_wc__x]) - 1
+        xmax = np.max(np.r_[w_t_wc__x, gt_w_t_wc__x]) + 1
+        ymin = np.min(np.r_[w_t_wc__y, gt_w_t_wc__y]) - 1
+        ymax = np.max(np.r_[w_t_wc__y, gt_w_t_wc__y]) + 1
+        zmin = np.min(np.r_[w_t_wc__z, gt_w_t_wc__z]) - 1
+        zmax = np.max(np.r_[w_t_wc__z, gt_w_t_wc__z]) + 1
+
+        max_range = max(xmax - xmin, zmax - zmin, ymax - ymin)
+        mid_x = 0.5 * (xmin + xmax)
+        mid_z = 0.5 * (zmin + zmax)
+        mid_y = 0.5 * (ymin + ymax)
+
+        # Set the computed limits
+        ax.set_xlim(mid_x - 0.5 * max_range, mid_x + 0.5 * max_range)
+        ax.set_ylim(mid_y - 0.5 * max_range, mid_y + 0.5 * max_range)
+        ax.set_zlim(mid_z - 0.5 * max_range, mid_z + 0.5 * max_range)
+
+        # Have the camera view be the orientation of the world coord sys.
+        ax.view_init(elev=-80, azim=-90, roll=0)
+
+        plt.show()
+
+    def re_get_split_pos(self, trajectory_length: float):
+        """
+        Get the locations in the ground truth and the estimate trajectories at which 
+        they should be split into sub-trajectories. A split is made where the trans-
+        lation vectors of the ground truth add to trajectory_length. 
+
+        ### Parameters
+        1. trajectory_lenght : float
+            - Minimum length of each sub-trajectory in meters
+        """
+
+        split_pos = [0]
+        travelled = 0 
+        previous_t = self.gt_T_wc_list[0][:, 3]
+
+        for pos, gt_T_wc in enumerate(self.gt_T_wc_list):
+            
+            # The difference in translation compared to the previous pose
+            travel_vec = gt_T_wc[:, 3] - previous_t
+
+            # Increment the distance counter by the L2 norm of the translation
+            travelled += np.sqrt(np.sum(travel_vec**2))
+
+            if travelled >= trajectory_length:
+                split_pos.append(pos)
+                travelled = 0
+            
+            previous_t = gt_T_wc[:, 3]
+
+        return split_pos
+
 
 if __name__ == "__main__":
-    te = TrajectoryEval(dataset_name="malaga", first_frame=3)
+    
+    # Set the name and first frame. Make sure the trajectory file is in the directory
+    te = TrajectoryEval(dataset_name="kitti", first_frame=2)
+
+    # To show the relative error:
+
+    # Some suggestions for subtrajectory lengths (in meters)
+    trajec_length_kitti = (7, 23, 31, 100)
+    trajec_length_parking = (1, 5, 8)
+    te.relative_error(trajec_lenghts=trajec_length_kitti)
+
+    # To compute the absolute error and show the resulting plot:
     te.similarity_transform_3d()
-    print(te.absolue_trajectory_error())
     te.draw_trajectory(gt=True)
+    print(f"Root mean squared position ATE: {te.absolue_trajectory_error()}")
+    
