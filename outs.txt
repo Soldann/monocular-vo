@@ -1,0 +1,7 @@
+KITTI Opt (low): 25.38
+Parking: 2.58
+Malaga: 21.24
+Malaga Opt: 21.03
+Kitti low: 67.9
+Kitti: 22.2
+

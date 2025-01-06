@@ -11,20 +11,24 @@ from mpl_toolkits.mplot3d import proj3d
 
 class DataLoader():
 
-    def __init__(self, dataset: str, malaga_rect=False):
+    def __init__(self, dataset: str, malaga_rect=True, preload=True):
         """
         Retrieves the images and camera intrinsics for easy switching between
         different datasets.
 
         ### Parameters
         1. dataset : str
-            - Either "kitti", "malaga", or "parking" 
+            - Either "kitti", "malaga", "parking", "own_1", or "own_2"
         2. malaga_rect : bool
             - Define whether or not the rectified images should be returned
               for the Malaga dataset. If True, load the rectified left images
               and the average intrinsics of both cameras. If False, load the
               left distorted images and the left camera's intrinsics
         """
+        
+        # Keep name string reference when saving files during visualisation
+        self.dataset_str = dataset
+        self.images = []
         
         if dataset == "kitti":
             base_path = Path.cwd().joinpath("datasets", "kitti")
@@ -80,6 +84,7 @@ class DataLoader():
             k_matrix_path = base_path.joinpath("camera_params_raw_1024x768.txt")
             k_lc = np.zeros((3, 3)).astype(str)    # left camera intrinsics
             k_rc = np.zeros((3, 3)).astype(str)
+            k_lc[2, 2], k_rc[2, 2] = 1., 1.        # set bottom left element to 1
             self.dist = np.zeros(2).astype(str)    # T1, T2 distortion parameters
             with open(k_matrix_path) as txt_file:
                 content = txt_file.readlines()
@@ -115,18 +120,79 @@ class DataLoader():
             # Initial frames for bootstrapping:
             self.init_frames = (0, 3)
 
+        elif dataset == "own_1":
+            base_path = Path.cwd().joinpath("own_dataset", "ds1")
+            
+            # Load camera parameters
+            path_calib_data = base_path.joinpath("mtx_undistorted.txt")
+            K = np.loadtxt(path_calib_data, delimiter=',')
+            self.K = K
+
+            # The images have been undistorted
+            self.dist = None
+
+            # Path to the directory of the images
+            self.im_dir = base_path.joinpath("images", "undistorted")
+
+            # List of paths to all the images
+            self.all_im_paths = list(self.im_dir.glob("*"))
+
+            # Number of images in the dataset
+            self.n_im = len(self.all_im_paths)
+
+            # Initial frames for bootstrapping
+            self.init_frames = (0, 10)
+        
+        elif dataset == "own_2":
+            base_path = Path.cwd().joinpath("own_dataset", "ds2")
+            
+            # Load camera parameters for Kitti
+            path_calib_data = base_path.joinpath("mtx_undistorted.txt")
+            K = np.loadtxt(path_calib_data, delimiter=',')
+            self.K = K
+
+            # The images have been undistorted
+            self.dist = None
+
+            # Path to the directory of the images
+            self.im_dir = base_path.joinpath("images", "undistorted")
+
+            # List of paths to all the images
+            self.all_im_paths = list(self.im_dir.glob("*"))
+
+            # Number of images in the dataset
+            self.n_im = len(self.all_im_paths)
+
+            # Initial frames for bootstrapping
+            self.init_frames = (0, 10)
+
         else:  # The input is not in ("kitti", "parking", "malaga"):
-            raise ValueError("Did not specify one of 'kitti', 'parking'"
-                             +" or 'malaga'")
+            raise ValueError("Did not specify one of 'kitti', 'parking',"
+                             +" 'malaga', 'own_1', or 'own_2'.")
+        
+        if preload:
+            self.load()
+
+
+    def load(self):
+        print("Loading dataset images...", end="", flush=True)
+
+        for frame in self.all_im_paths:
+            self.images.append(cv2.imread(str(frame), cv2.IMREAD_GRAYSCALE))
+
+        print("done.")
 
 
     def __getitem__(self, index):
+
         if isinstance(index, slice):
             start, stop, step = index.indices(len(self.all_im_paths))
             return (self[i] for i in range(start, stop, step))
+        if index >= len(self.images):
+            return None
         else:
-            img_path = str(self.all_im_paths[index])
-            return cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+            img = self.images[index]
+            return img
 
 
 class Bootstrap():
@@ -152,10 +218,9 @@ class Bootstrap():
         
         self.data_loader = data_loader
         self.all_im_paths = data_loader.all_im_paths
-        self.init_frames = init_frames
         self.K = data_loader.K
         self.outlier_tolerance = outlier_tolerance
-        self.init_frames = data_loader.init_frames
+        self.init_frames = data_loader.init_frames if init_frames is None else init_frames
         
         # Filled in by get_points()
         self.E = None
@@ -212,9 +277,8 @@ class Bootstrap():
         self.E, ransac_inliers = cv2.findEssentialMat(points1, points2, self.K, method=cv2.FM_RANSAC, prob=0.999, threshold=1)
         ransac_inliers = ransac_inliers.astype(np.bool_).reshape(-1)
         self.keypoints = points2[ransac_inliers]
+        self.old_keypoints = points1[ransac_inliers]
         self.candidate_points = points2[~ransac_inliers]
-
-        #TODO: remove points behind the camera, too far from the mean, and too far depth wise
 
         _, self.R, self.t, _ = cv2.recoverPose(self.E, points1[ransac_inliers], points2[ransac_inliers], self.K)
         self.transformation_matrix = np.column_stack((self.R, self.t))
@@ -233,25 +297,16 @@ class Bootstrap():
         in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
         self.triangulated_points = self.triangulated_points[in_FOV]
         self.keypoints = self.keypoints[in_FOV]
+        self.old_keypoints = self.old_keypoints[in_FOV]
 
         # Outlier removal: remove points whose z-value greatly deviates from the median
         z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
         self.triangulated_points = self.triangulated_points[z_mask]
         self.keypoints = self.keypoints[z_mask]
+        self.old_keypoints = self.old_keypoints[z_mask]
 
-        # Outlier removal: checking if the points are inside the FOV
-        h, w = im1.shape
-        alpha = self.K[0, 0]
-        in_FOV = check_inside_FOV(alpha, w, h, self.triangulated_points)
-        self.triangulated_points = self.triangulated_points[in_FOV]
-        self.keypoints = self.keypoints[in_FOV]
 
-        # Outlier removal: remove points whose z-value greatly deviates from the median
-        z_mask = median_outliers(self.triangulated_points, *self.outlier_tolerance)
-        self.triangulated_points = self.triangulated_points[z_mask]
-        self.keypoints = self.keypoints[z_mask]
-
-        return self.keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy(), self.transformation_matrix.copy()
+        return self.keypoints.copy(), self.old_keypoints.copy(), self.triangulated_points.copy(), self.candidate_points.copy(), self.transformation_matrix.copy()
 
     def draw_landmarks(self, aspect_x=20, aspect_y=10, aspect_z=15):
         """
