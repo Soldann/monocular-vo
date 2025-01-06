@@ -39,7 +39,8 @@ class VoRunner():
             optimised_poses, pi, xi, ci = self.vo.process_frame(image, debug=[])
             p_new = optimised_poses[-1]
             updated_poses = optimised_poses[:-1]
-            self.poses[-len(updated_poses):] = updated_poses
+            if len(updated_poses) > 0:
+                self.poses[-len(updated_poses):] = updated_poses
             self.poses.append(p_new)
             self.data_queue.put((p_new, pi, xi, ci, image, index), block=False)  # Non-blocking put
 
