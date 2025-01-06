@@ -8,7 +8,6 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
 from pathlib import Path
 import cv2
-from arrow_3d import Arrow3D
 from scipy.linalg import expm, logm
 import numpy as np
 from matplotlib.patches import FancyArrow
@@ -98,6 +97,12 @@ def linear_LS_triangulation(u1, P1, u2, P2):
     u1 and u2 are matrices: amount of points equals #rows and should be equal for u1 and u2.
     
     The status-vector will be True for all points.
+
+    This code is from:
+    https://github.com/Eliasvan/Multiple-Quadrotor-SLAM/blob/master/Work/python_libs/triangulation.py
+
+    We felt it is okay to use it, as it does output the same results as the OpenCV triangulation function, just more accurate.
+
     """
     A = np.zeros((4, 3))
     b = np.zeros((4, 1))
