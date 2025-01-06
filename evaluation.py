@@ -100,29 +100,29 @@ class TrajectoryEval:
                                          +"_GPS.txt")
 
             # Loading array of when each image was taken (m_idx_to_time)
-            def conv(img_name):
+            def conv_gps(img_name):
                 return np.float64(img_name[12:29])
 
             m_idx_to_time = np.loadtxt(m_idx_to_time_path.as_posix(), 
-                                       dtype=np.float64, converters=conv)
+                                       dtype=np.float64, converters=conv_gps)
             m_idx_to_time = m_idx_to_time[::2]      # stereo: want only every second
 
             # Load GPS data
             m_gps = np.loadtxt(m_gps_path.as_posix(), skiprows=1, usecols=(0, 8, 9, 10))
 
-            # Find the closest time in among the images for each GPS time
-            m_diff = np.abs(m_idx_to_time[:, np.newaxis] - m_gps[:, 0])
-            m_match_idx = np.argmin(m_diff, axis=0)
+            # Find the closest time among the images for each GPS time
+            m_diff_gps = np.abs(m_idx_to_time[:, np.newaxis] - m_gps[:, 0])
+            m_match_idx_gps = np.argmin(m_diff_gps, axis=0)
 
             # The images where comparison can actually happen
-            m_max_index = min(first_frame + len(self.T_cw_list), m_match_idx[-1])
-            m_gps_mask = (m_match_idx <= m_max_index) & (m_match_idx >= first_frame)
-            m_match_idx = m_match_idx[m_gps_mask]
-            self.n_poses = m_match_idx.shape[0]
+            m_max_index = min(first_frame + len(self.T_cw_list), m_match_idx_gps[-1])
+            m_gps_mask = (m_match_idx_gps <= m_max_index) & (m_match_idx_gps >= first_frame)
+            m_match_idx_gps = m_match_idx_gps[m_gps_mask]
+            self.n_poses = m_match_idx_gps.shape[0]
 
             # Format to index an array of stacked T-matrices (T_wc)
-            m_match_idx_Twc = np.c_[3 * m_match_idx, 3 * m_match_idx + 1,
-                                     3 * m_match_idx + 2].flatten()
+            m_match_idx_Twc = np.c_[3 * m_match_idx_gps, 3 * m_match_idx_gps + 1,
+                                     3 * m_match_idx_gps + 2].flatten()
 
             # Can only compare at matched locations: restrict T_wc
             self.T_wc_array = self.T_wc_array[m_match_idx_Twc]
@@ -131,8 +131,60 @@ class TrajectoryEval:
             
             # The corresponding GPS positions (orientation not given)
             m_gps_pos = m_gps[m_gps_mask, 1:]
-            self.gt_T_wc_array = np.zeros_like(self.T_wc_array)
-            self.gt_T_wc_array[:, -1] = m_gps_pos.flatten()
+
+            # ----- ALIGN GPS AND IMU ----- # 
+
+            m_imu_path = m_path.joinpath("malaga-urban-dataset-extract-07_all-"
+                                         + "sensors_IMU.txt")
+
+            # Load IMU data
+            m_imu = np.loadtxt(m_imu_path.as_posix(), skiprows=1, 
+                                   usecols=(0, 10, 11, 12))
+            
+            # Find the closest GPS time (GPS data is the temporal bottleneck):
+            m_diff_imu = np.abs(m_imu[:, 0, np.newaxis] - m_gps[:, 0])
+            m_match_idx_gps_imu = np.argmin(m_diff_imu, axis=0)
+
+            # Restrict the matching times to where the gps data overlaps the 
+            # times of the frames in the trajectory
+            m_match_idx_gps_imu = m_match_idx_gps_imu[m_gps_mask]
+
+            """
+            # Yaw
+            plt.plot(m_idx_to_time[m_match_idx_gps], m_imu[m_match_idx_gps_imu, 1], "r-")
+            # Pitch
+            plt.plot(m_idx_to_time[m_match_idx_gps], m_imu[m_match_idx_gps_imu, 2], "b-")            
+            # Roll
+            plt.plot(m_idx_to_time[m_match_idx_gps], m_imu[m_match_idx_gps_imu, 3], "g-")
+
+            plt.show(block=True)
+            """
+            
+            # Convert from yaw, pitch, roll to rotation matrices:
+            yaws = m_imu[m_match_idx_gps_imu, 1]
+            pitches = m_imu[m_match_idx_gps_imu, 2]
+            rolls = m_imu[m_match_idx_gps_imu, 3]
+
+            R_z = [np.array([[1, 0,           0           ],
+                             [0, np.cos(yaw), -np.sin(yaw)],
+                             [0, np.sin(yaw), np.cos(yaw) ]]) for yaw in yaws]
+            R_y = [np.array([[np.cos(pitch),  0, np.sin(pitch)],
+                             [0,              1,             0],
+                             [-np.sin(pitch), 0, np.cos(pitch)]]) for pitch in pitches]
+            R_x = [np.array([[np.cos(roll), -np.sin(roll), 0],
+                             [np.sin(roll), np.cos(roll),  0],
+                             [0,            0,              1]]) for roll in rolls]
+            # Rx Rz Ry T
+            R_imu_list = [(Rz @ Ry @ Rx).T for Rz, Ry, Rx in zip(R_z, R_y, R_x)]
+            R_init = R_imu_list[0]
+            # R_imu_list = [R @ R_init.T for R in R_imu_list]
+            R_imu_array = np.vstack(R_imu_list)
+
+            self.gt_T_wc_array = np.c_[R_imu_array, m_gps_pos.flatten()]
+            self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
+                                 for i in range(self.n_poses)]
+            
+            # self.gt_T_wc_array[:, -1] = m_gps_pos.flatten()
         
         else:
 
@@ -224,10 +276,6 @@ class TrajectoryEval:
         # The point coordinates in a (n x 3) array (...in world coordinates)
         gt_w_t_wc = self.gt_T_wc_array[:, 3].reshape(-1, 3)
         w_t_wc = self.T_wc_array[:, 3].reshape(-1, 3)
-
-
-        print(w_t_wc.shape, gt_w_t_wc.shape)
-
 
         # The mean point for the ground truth and estimated trajectors
         mu_p_hat = np.mean(w_t_wc, axis=0)          # mean trajectory point
@@ -536,10 +584,10 @@ if __name__ == "__main__":
     # Some suggestions for subtrajectory lengths (in meters)
     trajec_length_kitti = (7, 23, 31, 100)
     trajec_length_parking = (1, 5, 8)
+    trajec_length_malaga = (20, 30)
     te.relative_error(trajec_lenghts=trajec_length_kitti)
 
     # To compute the absolute error and show the resulting plot:
     te.similarity_transform_3d()
     te.draw_trajectory(gt=True)
     print(f"Root mean squared position ATE: {te.absolue_trajectory_error()}")
-    
