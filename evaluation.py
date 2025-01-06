@@ -46,9 +46,11 @@ class TrajectoryEval:
 
         # ---------- LOAD EST. TRAJECTORY FROM FILE ---------- #
 
+        self.dataset_name = dataset_name
+
         # Load T_cw_list from .pkl file in "solution_trajectories"
         trajec_dir = Path().cwd().joinpath("solution_trajectories")
-        poses_path = trajec_dir.joinpath(dataset_name + ".pkl")
+        poses_path = trajec_dir.joinpath(self.dataset_name + ".pkl")
         with open(poses_path, "rb") as f:
             self.T_cw_list = pickle.load(f)
         
@@ -59,7 +61,7 @@ class TrajectoryEval:
         # ---------- LOAD GT TRAJECTORY FROM FILE ---------- #
         
         # Depending on the passed datset_name, load the ground truth trajectory
-        if dataset_name == "parking":
+        if self.dataset_name == "parking":
             
             # Load ground truth poses
             gt_poses_path = Path.cwd().joinpath("datasets", "parking", "poses.txt")
@@ -72,7 +74,7 @@ class TrajectoryEval:
             self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
                                  for i in range(self.n_poses)]
 
-        elif dataset_name == "kitti":
+        elif self.dataset_name == "kitti":
 
             # Load ground truth poses
             gt_poses_path = Path.cwd().joinpath("datasets", "kitti", "poses", "05.txt")
@@ -85,7 +87,7 @@ class TrajectoryEval:
             self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
                                  for i in range(self.n_poses)]
         
-        elif dataset_name == "malaga":
+        elif self.dataset_name == "malaga":
 
             # All variables starting with m_ relate to Malaga
 
@@ -132,59 +134,36 @@ class TrajectoryEval:
             # The corresponding GPS positions (orientation not given)
             m_gps_pos = m_gps[m_gps_mask, 1:]
 
-            # ----- ALIGN GPS AND IMU ----- # 
+            # ---------- POSE ALIGNMENT USING TWO GT POSITIONS --------- #
 
-            m_imu_path = m_path.joinpath("malaga-urban-dataset-extract-07_all-"
-                                         + "sensors_IMU.txt")
+            # Malaga does not provide ground truth orientations. The IMU data has
+            # not been found to provide very reliable GT estimates.
+            # Since the camera is forward-facing in malaga and there is no rolling
+            # the following approximation of the orientation can be made based on
+            # pairs of points from the ground truth positions
 
-            # Load IMU data
-            m_imu = np.loadtxt(m_imu_path.as_posix(), skiprows=1, 
-                                   usecols=(0, 10, 11, 12))
-            
-            # Find the closest GPS time (GPS data is the temporal bottleneck):
-            m_diff_imu = np.abs(m_imu[:, 0, np.newaxis] - m_gps[:, 0])
-            m_match_idx_gps_imu = np.argmin(m_diff_imu, axis=0)
+            w_y_c = np.array([0, 1, 0])
+            R_wc = []
 
-            # Restrict the matching times to where the gps data overlaps the 
-            # times of the frames in the trajectory
-            m_match_idx_gps_imu = m_match_idx_gps_imu[m_gps_mask]
+            for i in range(m_gps_pos.shape[0] - 1):
 
-            """
-            # Yaw
-            plt.plot(m_idx_to_time[m_match_idx_gps], m_imu[m_match_idx_gps_imu, 1], "r-")
-            # Pitch
-            plt.plot(m_idx_to_time[m_match_idx_gps], m_imu[m_match_idx_gps_imu, 2], "b-")            
-            # Roll
-            plt.plot(m_idx_to_time[m_match_idx_gps], m_imu[m_match_idx_gps_imu, 3], "g-")
+                current_t = m_gps_pos[i]
+                next_t = m_gps_pos[i + 1]
 
-            plt.show(block=True)
-            """
-            
-            # Convert from yaw, pitch, roll to rotation matrices:
-            yaws = m_imu[m_match_idx_gps_imu, 1]
-            pitches = m_imu[m_match_idx_gps_imu, 2]
-            rolls = m_imu[m_match_idx_gps_imu, 3]
+                # The difference vector as the z-direction of the camera frame
+                delta = next_t - current_t
 
-            R_z = [np.array([[1, 0,           0           ],
-                             [0, np.cos(yaw), -np.sin(yaw)],
-                             [0, np.sin(yaw), np.cos(yaw) ]]) for yaw in yaws]
-            R_y = [np.array([[np.cos(pitch),  0, np.sin(pitch)],
-                             [0,              1,             0],
-                             [-np.sin(pitch), 0, np.cos(pitch)]]) for pitch in pitches]
-            R_x = [np.array([[np.cos(roll), -np.sin(roll), 0],
-                             [np.sin(roll), np.cos(roll),  0],
-                             [0,            0,              1]]) for roll in rolls]
-            # Rx Rz Ry T
-            R_imu_list = [(Rz @ Ry @ Rx).T for Rz, Ry, Rx in zip(R_z, R_y, R_x)]
-            R_init = R_imu_list[0]
-            # R_imu_list = [R @ R_init.T for R in R_imu_list]
-            R_imu_array = np.vstack(R_imu_list)
+                w_z_c = delta / np.sqrt(np.sum(delta**2))
+                w_x_c = np.cross(w_y_c, w_z_c)
+                w_x_c /= np.sqrt(np.sum(w_x_c**2))
 
-            self.gt_T_wc_array = np.c_[R_imu_array, m_gps_pos.flatten()]
+                R_wc.append(np.c_[w_x_c, w_y_c, w_z_c])
+
+            R_wc.append(R_wc[-1])
+
+            self.gt_T_wc_array = np.c_[np.vstack(R_wc), m_gps_pos.flatten()]
             self.gt_T_wc_list = [self.gt_T_wc_array[(3 * i):(3 * i + 3)] 
                                  for i in range(self.n_poses)]
-            
-            # self.gt_T_wc_array[:, -1] = m_gps_pos.flatten()
         
         else:
 
@@ -325,26 +304,6 @@ class TrajectoryEval:
         """
         Compute the ATE. The trajectories should already be aligned by use
         of self.similarity_transform_3d() at this point
-        """
-
-        """
-        # Vector error measures
-        delta_R = [gt_T_wc[:, :3] @ T_wc[:, :3].T 
-                   for gt_T_wc, T_wc in 
-                   zip(self.gt_T_wc_list, self.T_cw_list)]
-        delta_p = [gt_T_wc[:, 3] - delta_R @ T_wc[:, 3] 
-                   for gt_T_wc, delta_R, T_wc in 
-                   zip(self.gt_T_wc_list, delta_R, self.T_wc_list)]
-        
-        # Compute ATE for rotation
-        angle_delta_R_list = [Rodrigues(delta_R)[0]         # answer in degrees
-                              for delta_R in delta_R]
-        angle_delta_R_array = np.vstack(angle_delta_R_list)
-        ate_rot = np.sqrt(np.sum(angle_delta_R_array**2) / self.n_poses)
-
-        # Compute ATE for position
-        delta_p_array = np.hstack(delta_p)
-        ate_pos = np.sqrt(np.sum(delta_p_array**2) / self.n_poses)
         """
 
         # Compute the RMSE as shown on the lecture slides
@@ -577,7 +536,7 @@ class TrajectoryEval:
 if __name__ == "__main__":
     
     # Set the name and first frame. Make sure the trajectory file is in the directory
-    te = TrajectoryEval(dataset_name="kitti", first_frame=2)
+    te = TrajectoryEval(dataset_name="kitti", first_frame=3)
 
     # To show the relative error:
 
