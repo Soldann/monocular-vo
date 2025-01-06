@@ -1,4 +1,4 @@
-# monocular-vo by some people that try to do test commits.
+# monocular-vo project VAMR 2024
 
 # Dataset setup
 
@@ -11,4 +11,12 @@ KITTI 05 dataset (hard)	| [kitti05.zip](https://rpg.ifi.uzh.ch/docs/teaching/202
 Malaga 07 dataset (hard) | [malaga-urban-dataset-extract-07.zip](https://rpg.ifi.uzh.ch/docs/teaching/2024/malaga-urban-dataset-extract-07.zip) (2.4 GB)
 
 This should get you folders `datasets/kitti`, `datasets/malaga-urban-dataset-extract-07`, and `datasets/parking`
-for use in the pipeline.
+for use in the pipeline. The additional dataset recorded for this project is in a folder `own_dataset` with subfolders `own_dataset/ds1`, `own_dataset/ds2`, and `own_dataset/calibration`. 
+
+# Running the script
+Run main.py. You are prompted to insert a number determining what dataset should be evaluated. Before VO begins, the raw images are loaded into memory.
+
+# Specifications of the computer from the demo-video
+- Ryzen 97950x16/32 cores/threads at 5.2GHz
+- The threads of the python threading tool may span over multiple cores, so the exact number of CPU threads is not known, but overall CPU usage was about 30%
+- 64GB of 6000MHz dual channel memory, only about 1Gb of RAM usage, however
