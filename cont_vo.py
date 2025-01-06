@@ -15,7 +15,7 @@ class VO:
         TRIANGULATION = 1
         SIFT = 2
 
-    def __init__(self, bootstrap_obj: Bootstrap, max_keypoints=700):
+    def __init__(self, bootstrap_obj: Bootstrap, hyperparams):
         """
         Visual Odometry pipeline.
         
@@ -27,6 +27,8 @@ class VO:
             - Instance of bootstrap giving the initial point cloud of land-
               marks and the positions of the corresponding keypoints
         """
+
+        self.hyperparams = hyperparams
 
         # Setting information from bootstrapping
         self.dl = bootstrap_obj.data_loader                              # data loader
@@ -55,7 +57,7 @@ class VO:
         self.debug_ids = [self.dl.init_frames[-1]] * len(self.Ci_1)
         self.debug_counter = self.dl.init_frames[-1]
         
-        self.max_keypoints = max_keypoints
+        self.max_keypoints = self.hyperparams.max_kp
 
         # Parameters Lucas Kanade
         self.lk_params = dict( winSize  = (31, 31),
@@ -63,9 +65,7 @@ class VO:
         
         # angle threshold
         self.angle_threshold = 0.09991679144388552 # Assuming baseline is 10% of the depth
-        self.angle_threshold = 0.01
-
-        self.sift_keypoint_similarity_threshold = 10
+        self.angle_threshold = self.hyperparams.angle_threshold
 
         self.pose_optimiser = PoseGraphOptimizer(self.K, self.T_Ci_1__w.copy() )
         self.pose_optimiser.add_image(self.img_i_1.copy(), self.T_Ci_1__w.copy()) # add if not repeating the second bootstrap image
@@ -195,11 +195,11 @@ class VO:
         ransac_2d_points = self.Pi_1
         mask = np.ones(len(ransac_2d_points), dtype=bool)
 
-        if self.dl.dataset_str == 'sa':
+        if self.hyperparams.do_ransac1:
             unit_p1 = self.reproject_to_unit_sphere_opencv(self.Pi_1, self.K)
             unit_p2 = self.reproject_to_unit_sphere_opencv(self.Pi_old, self.K)
             thetas = self.compute_theta(unit_p1, unit_p2)
-            indices_valid = self.find_indices_in_max_bin(thetas)
+            indices_valid = self.find_indices_in_max_bin(thetas, self.hyperparams.ransac1_bincount)
 
             mask = np.zeros(len(thetas), dtype=bool)
             print(f"1-P RANSAC inlier count: {len(indices_valid)}")
@@ -213,7 +213,7 @@ class VO:
             ransac_3d_points = self.Xi_1[mask]
             ransac_2d_points = self.Pi_1[mask]
         
-        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=6, iterationsCount=500) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
+        success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=self.hyperparams.ransac_acc, iterationsCount=500) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
         if ransac_inliers is None or len(ransac_inliers) < len(ransac_2d_points)/3:
             success, r_cw, c_t_cw, ransac_inliers = cv2.solvePnPRansac(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, reprojectionError=9, iterationsCount=300) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
         #success, r_cw, c_t_cw = cv2.solvePnP(ransac_3d_points, ransac_2d_points, self.K, self.distortion_coefficients, flags=cv2.SOLVEPNP_ITERATIVE) # Note that Pi_1 and Xi_1 are actually for Pi and Xi, since we updated them above
@@ -332,8 +332,7 @@ class VO:
 
         old_features = np.row_stack((self.Pi_1, self.Ci_1))
 
-        feature_add_count = 500 * 1000//len(self.Pi_1)
-        self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
+
 
         sift_img = self.img_i_1.copy()  # Copy the original image to work on it
         
@@ -346,11 +345,15 @@ class VO:
 
         mask = np.ones(sift_img.shape, dtype=np.uint8) * 255  # Start with full mask
         for kp in old_features:
-            cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=20, color=0, thickness=-1)
+            cv2.circle(mask, (int(kp[0]), int(kp[1])), radius=self.hyperparams.block_radius, color=0, thickness=-1)
         
         blocks = sift_img.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
         mask_blocks = mask.reshape(split_count_h, h // split_count_h, split_count_w, w // split_count_w).transpose(0, 2, 1, 3).reshape(split_count_h * split_count_w, h // split_count_h, w // split_count_w)
         
+        if self.hyperparams.do_sift:
+            feature_add_count = 500 * 1000//len(self.Pi_1)
+            self.sift = cv2.SIFT_create(nfeatures=feature_add_count, sigma=2.0, edgeThreshold=10)
+
         new_candidates = []
 
         t = time.time()
@@ -368,37 +371,23 @@ class VO:
             offset_x = col * (sift_w // split_count_w)
             offset_y = row * (sift_h // split_count_h)
             block_offset = np.array([offset_x, offset_y])
-            # keypoints = self.sift.detect(block, mask_block)
-            keypoints = []
-            supposed_len = 30 * 1000//len(self.Pi_1)
-            # for keypoint in sorted(keypoints, key=lambda k: -k.response):
-            #     keypoint.pt += block_offset
-                #new_candidates.append(keypoint.pt)
             
-            if(len(keypoints) < supposed_len) or True:
+            keypoints = []
+            if self.hyperparams.do_sift:
+                keypoints = self.sift.detect(block, mask_block)
+                for keypoint in sorted(keypoints, key=lambda k: -k.response):
+                    keypoint.pt += block_offset
+                    new_candidates.append(keypoint.pt)
+
+            supposed_len = 30 * 1000//len(self.Pi_1)
+            if(len(keypoints) < supposed_len):
                 # do Shi-Tomasi
-                corners = cv2.goodFeaturesToTrack(block, maxCorners=2500, qualityLevel=0.01, minDistance=20)
+                corners = cv2.goodFeaturesToTrack(block, maxCorners=self.hyperparams.harris_count, qualityLevel=self.hyperparams.harris_threshold, minDistance=self.hyperparams.block_radius)
                 if corners is not None:
                     for corner in corners:
                         new_candidates.append(np.array([corner[0][0] + offset_x, corner[0][1] + offset_y]))
 
         print(f"Time taken for {blocks.shape[0]} blocks: {time.time() - t} seconds")
-
-        # if total <= self.max_keypoints:
-        #     new_candidates = self.sift.detect(sift_img, mask)
-        # elif left_of_screen < total/3:
-        #     left_half = sift_img[:, :w // 3]  # Left half
-        #     left_mask = mask[:, :w // 3]
-        #     new_candidates = self.sift.detect(left_half, left_mask)
-
-        # elif right_of_screen < total/3:
-        #     right_half = sift_img[:, w*2 // 3:]  # Right half
-        #     right_mask = mask[:, w*2 // 3:]
-        #     new_candidates = self.sift.detect(right_half, right_mask)
-        #     # add w//2 to every x coorndiate
-        #     for c in new_candidates:
-        #         c.pt = (c.pt[0] + w*2 // 3, c.pt[1])
-
 
         #new_candidates = [kp for kp in new_candidates if kp.response > 0.0001]
         
@@ -509,26 +498,26 @@ class VO:
         right_of_screen = np.sum(self.Ci_1[:, 0] > w*2/5)
 
         total_too_small = total <= self.max_keypoints
-        left_too_small = left_of_screen < total/2 and left_of_screen < self.max_keypoints
-        right_too_small = right_of_screen < total/2 and right_of_screen < self.max_keypoints
+        left_too_small = left_of_screen < total/3 and left_of_screen < self.max_keypoints
+        right_too_small = right_of_screen < total/3 and right_of_screen < self.max_keypoints
 
         if total_too_small or left_too_small or right_too_small or True:
-            self.extract_new_features(1, 1, total, right_too_small, left_too_small, total_too_small)
+            self.extract_new_features(self.hyperparams.w_split, self.hyperparams.h_split, total, right_too_small, left_too_small, total_too_small)
 
         SIFT_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t
 
 
         # Step 7.5? Pose graph optimisation
-        self.pose_optimiser.add_image(img_i,self.T_Ci_1__w.copy())
-
         Optimizer_keypoints_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t
-
-        optimised_poses = self.pose_optimiser.optimize()
-        optimised_poses = [twist2HomogMatrix(pose)[:3,:] for pose in optimised_poses]
-        self.T_Ci_1__w = optimised_poses[-1]
+        if self.hyperparams.do_optimize:
+            self.pose_optimiser.add_image(img_i,self.T_Ci_1__w.copy())
+            optimised_poses = self.pose_optimiser.optimize()
+            optimised_poses = [twist2HomogMatrix(pose)[:3,:] for pose in optimised_poses]
+            self.T_Ci_1__w = optimised_poses[-1]
+        else:
+            optimised_poses = [self.T_Ci_1__w]
 
         Optimizer_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t - Triangulation_t - SIFT_t - Optimizer_keypoints_t
-
         total_time =  time.time() - start_t
 
         # print all times

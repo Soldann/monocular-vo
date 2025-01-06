@@ -4,7 +4,7 @@ import pickle
 from cont_vo import VO
 from initialise_vo import Bootstrap, DataLoader
 from vo_runner import VoRunner
-
+from hyperparams import Hyperparameters
 USER_DS_QUESTION = "Which dataset would you like to use? Options are: 'parking' (1), 'kitti' (2), 'malaga' (3), 'own_1' (4), or 'own_2' (5). Enter your choice as a number: "
 
 
@@ -25,8 +25,10 @@ def get_ds_name_from_user():
 
 def init(ds_name):
     dl = DataLoader(ds_name)
+    params = Hyperparameters().get_params(ds_name)
+    Hyperparameters().print_params(ds_name)
     b = Bootstrap(dl, outlier_tolerance=(15, None, 15))
-    vo = VO(b)
+    vo = VO(b, params)
 
     return dl, b, vo
 

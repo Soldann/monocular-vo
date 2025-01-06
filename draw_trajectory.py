@@ -76,9 +76,9 @@ class DrawTrajectory():
         # Upper plot:
         self.u_im = self.u.imshow(im, cmap="grey")
         self.u_candidatepoints = self.u.scatter(p[:, 0], p[:, 1], marker="x",
-                                          alpha=0.5, c='g', s=25)
+                                          alpha=0.5, c='g', s=15)
         self.u_keypoints = self.u.scatter(p[:, 0], p[:, 1], marker="o",
-                                          alpha=1, cmap=c_map, c=z_c, s=5)
+                                          alpha=1, cmap=c_map, c=z_c, s=2)
         self.cbar = self.fig.colorbar(self.u_keypoints, orientation="vertical")
         self.cbar.set_label("Distance from camera, SFM units")
         self.u.set_title("Current image with landmarks")

@@ -169,9 +169,12 @@ class DataLoader():
         else:  # The input is not in ("kitti", "parking", "malaga"):
             raise ValueError("Did not specify one of 'kitti', 'parking',"
                              +" 'malaga', 'own_1', or 'own_2'.")
-        
+        print("Preloading dataset images...", end="", flush=True)
+
         for frame in self.all_im_paths:
             self.images.append(cv2.imread(str(frame), cv2.IMREAD_GRAYSCALE))
+
+        print("done.")
 
     def __getitem__(self, index):
 
