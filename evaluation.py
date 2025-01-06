@@ -389,7 +389,7 @@ class TrajectoryEval:
             R_align = self.gt_T_wc_list[pos][:, :3] @ self.T_wc_list[pos][:, :3].T
 
             # Compute the rotation error at the last frame of the subtrajectory
-            # First apply alignemtn to the rotation estimation of the last frame
+            # First apply alignment to the rotation estimation of the last frame
             R_last_aligned = R_align @ self.T_wc_list[next_pos][:, :3] 
             R_err = R_last_aligned @ self.gt_T_wc_list[next_pos][:, :3].T
 

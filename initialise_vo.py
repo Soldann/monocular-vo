@@ -280,8 +280,6 @@ class Bootstrap():
         self.old_keypoints = points1[ransac_inliers]
         self.candidate_points = points2[~ransac_inliers]
 
-        #TODO: remove points behind the camera, too far from the mean, and too far depth wise
-
         _, self.R, self.t, _ = cv2.recoverPose(self.E, points1[ransac_inliers], points2[ransac_inliers], self.K)
         self.transformation_matrix = np.column_stack((self.R, self.t))
 

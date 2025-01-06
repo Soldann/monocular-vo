@@ -488,8 +488,7 @@ class VO:
         Triangulation_t = time.time() - start_t - KLT_1_time - RANSAC_t - KLT_2_t - Angle_t
 
 
-        # Step 7: Run SIFT if C is too small to add new candidates
-        # TODO: Implement this step
+        # Step 7: Run feature detection if C is too small to add new candidates. May be SIFT or Shi-Tomasi
         h, w = img_i.shape
         total = len(self.Ci_1)
         left_of_screen = np.sum(self.Ci_1[:, 0] < w*3/5)
