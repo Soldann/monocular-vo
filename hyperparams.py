@@ -9,9 +9,11 @@ class Hyperparameters:
         kitti.max_kp = 1000
         kitti.block_radius = 15
         malaga = HyperparameterInstance()
-        malaga.block_radius = 15
+        malaga.block_radius = 60
         malaga.max_kp = 1250
-        malaga.do_sift = False
+        malaga.do_sift = True
+        malaga.harris_count = 50
+        malaga.harris_threshold = 0.1
         malaga.do_optimize = True
 
         own1 = HyperparameterInstance()
