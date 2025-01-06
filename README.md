@@ -6,6 +6,8 @@ A video demonstration of the pipeline in action can be found below ([click here 
 
 [![YouTube](http://i.ytimg.com/vi/hEA7zJPG3Gs/hqdefault.jpg)](https://www.youtube.com/watch?v=hEA7zJPG3Gs)
 
+A breakdown of the code and features incorporated can be found in the [project_report](VAMR_Project_Report.pdf)
+
 ## Specifications of the computer from the demo-video
 - Ryzen 97950x16/32 cores/threads at 5.2GHz
 - The threads of the python threading tool may span over multiple cores, so the exact number of CPU threads is not known, but overall CPU usage was about 30%
